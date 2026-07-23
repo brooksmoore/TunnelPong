@@ -79,3 +79,49 @@ enum CourtMath {
         return max(0, min(ringCount - 1, raw))
     }
 }
+
+// MARK: - Peer mirror (v2 prep; not used by solo gameplay)
+
+/// Maps local-frame world state into the peer's local frame for network send.
+///
+/// **Convention (locked in docs/V2_DESIGN.md):**
+/// - Each device always *stores* state in local frame: self at z = 0, opponent at zFar.
+/// - Apply this transform **on send only**. Never also on receive (double-flip).
+/// - x sign: `-x` as specified; verify on first two-device playtest and update tests if flipped.
+///
+///     z'  = zFar - z
+///     x'  = -x
+///     vz' = -vz
+///     vx' = -vx
+///     y, vy unchanged
+enum PeerMirror {
+
+    struct Pose: Equatable {
+        var x: CGFloat
+        var y: CGFloat
+        var z: CGFloat
+    }
+
+    struct Velocity: Equatable {
+        var vx: CGFloat
+        var vy: CGFloat
+        var vz: CGFloat
+    }
+
+    static func position(_ p: Pose, zFar: CGFloat) -> Pose {
+        Pose(x: -p.x, y: p.y, z: zFar - p.z)
+    }
+
+    static func velocity(_ v: Velocity) -> Velocity {
+        Velocity(vx: -v.vx, vy: v.vy, vz: -v.vz)
+    }
+
+    /// Full ball snapshot helper for handoff packets.
+    static func ball(x: CGFloat, y: CGFloat, z: CGFloat,
+                     vx: CGFloat, vy: CGFloat, vz: CGFloat,
+                     zFar: CGFloat) -> (Pose, Velocity) {
+        let p = position(Pose(x: x, y: y, z: z), zFar: zFar)
+        let v = velocity(Velocity(vx: vx, vy: vy, vz: vz))
+        return (p, v)
+    }
+}

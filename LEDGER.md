@@ -184,3 +184,86 @@ TunnelPong/
 Working tree was clean after push. Clone with: `gh repo clone brooksmoore/TunnelPong` (auth required; private).
 
 ---
+## 2026-07-23 — v2/v3 scope locked; gate enforced; PeerMirror prep
+
+**Actor:** Grok, at Brooks’s request to proceed comprehensively on the v2/v3 scope document.
+
+### Intelligent handling of the gate
+
+The scope’s first rule is: **do not begin v2 until the gate is green.** Brooks has played v1 on **Simulator** and said it “looks good,” but the gate still requires:
+
+1. Physical iPhone, several sessions  
+2. Difficulty “losing is my fault”  
+3. Config frozen across sessions  
+4. A second person understands the tunnel unprompted  
+
+**Therefore: no MultipeerConnectivity, no versus game loop, no GameKit.** v2 code starts only when `STATUS.md` gate table is all done.
+
+### What was delivered (docs + safe prep)
+
+| Artifact | Purpose |
+|----------|---------|
+| `docs/ROADMAP.md` | Full v1→v2→v3 plan, gate, five v2 decisions, v3 honesty + cheaper alternatives |
+| `docs/V2_DESIGN.md` | Implementation blueprint: modules, messages, ownership, lifecycle, PR order |
+| `STATUS.md` | Live gate checklist (all **OPEN**), locked decisions, next actions |
+| `PeerMirror` in `Projection.swift` | Pure send-side coordinate mirror; **not wired to gameplay** |
+| Unit tests | Invertibility + near/far flip for PeerMirror |
+| `README.md` | Links to roadmap/status; gate warning; Simulator 26.1 note |
+
+### Decisions recorded as locked
+
+1. **Transport v2:** MultipeerConnectivity (throwaway vs GameKit later; no accounts for couch play)  
+2. **Authority:** Split — inbound device owns ball; local plane is local truth  
+3. **Mirror:** Local frame storage; transform **on send only** (`PeerMirror`)  
+4. **Rules v2:** Equal paddles; rally ramp; first-to-N / best-of-M; alternate serve  
+5. **v3:** GameKit if ever; prefer ghost / solo leaderboards / invite-only; demand-driven  
+
+### Explicit non-actions
+
+- Did not change solo feel, scoring, AI, or `Config` defaults  
+- Did not add networking entitlements or Info.plist Bonjour keys  
+- Did not start v3  
+
+### Next human step
+
+Play v1 on a real phone for several sessions; freeze Config; second-person playtest; flip gate rows in `STATUS.md`; then implement `docs/V2_DESIGN.md` PR sequence.
+
+---
+## 2026-07-23 — Claude: full build + tests + run verified on real toolchain
+
+**Actor:** Claude (Opus 4.8), after helping Brooks upgrade his Mac's Xcode.
+
+Closes the open item from the post-Grok entry ("build/run/⌘U not completed here").
+Grok couldn't run these because its Mac lacked the iOS platform; Brooks's Mac had
+only Xcode 13.1. Resolved by installing the toolchain below, then verifying.
+
+### Toolchain installed on Brooks's Mac (2019 Intel MacBook Pro, macOS 15.7.7)
+
+| Item | Value |
+|------|-------|
+| Xcode | **26.1** (Universal — last Intel-capable build; 26.2+/27 are Apple-Silicon-only) at `/Applications/Xcode-26.1.app` |
+| Old Xcode | 13.1 left at `/Applications/Xcode.app` (App-Store-protected; harmless) |
+| Active | `sudo xcode-select -s /Applications/Xcode-26.1.app/Contents/Developer` + `-runFirstLaunch` |
+| Simulator runtime | iOS **26.1** (23B86), downloaded via `xcodebuild -downloadPlatform iOS` |
+
+### Verified
+
+- `xcodebuild build` (iphonesimulator, iOS 26 SDK): **clean**.
+- `xcodebuild test` on **iPhone 17 / iOS 26.1**: **TEST SUCCEEDED** — all 16
+  `CourtMathTests` pass (first actual execution of Grok's tests).
+- App installed + launched on iPhone 17 sim: **title screen renders correctly**
+  (tunnel rings, TUNNEL PONG, HUD clears the Dynamic Island via safeInsets).
+- Brooks confirmed it plays great in the simulator.
+
+### Not changed by Claude
+
+- No code changes. Grok's patches + tests stand as-is.
+
+### Known / on-device note
+
+- Brooks's iPhone is on **iOS 27 public beta** — newer than Xcode 26.1 supports,
+  so cable install is blocked. Decision: **Simulator-only for v1.** On-device
+  later needs TestFlight or AltStore (both bypass the cable limit) or an Apple
+  Silicon Mac. Still open from Grok's list: app icon, `PrivacyInfo.xcprivacy`.
+
+---

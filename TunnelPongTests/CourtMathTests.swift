@@ -116,4 +116,46 @@ final class CourtMathTests: XCTestCase {
         XCTAssertEqual(CourtMath.ringIndex(z: 0, zFar: 900, ringCount: 13), 0)
         XCTAssertEqual(CourtMath.ringIndex(z: 900, zFar: 900, ringCount: 13), 12)
     }
+
+    // MARK: - PeerMirror (v2 coordinate convention)
+
+    func testPeerMirrorPositionFlipsDepthAndX() {
+        let zFar: CGFloat = 900
+        let out = PeerMirror.position(.init(x: 40, y: 12, z: 225), zFar: zFar)
+        XCTAssertEqual(out.x, -40, accuracy: 0.0001)
+        XCTAssertEqual(out.y, 12, accuracy: 0.0001)
+        XCTAssertEqual(out.z, 675, accuracy: 0.0001) // 900 - 225
+    }
+
+    func testPeerMirrorVelocityFlipsXZ() {
+        let out = PeerMirror.velocity(.init(vx: 10, vy: -3, vz: -100))
+        XCTAssertEqual(out.vx, -10, accuracy: 0.0001)
+        XCTAssertEqual(out.vy, -3, accuracy: 0.0001)
+        XCTAssertEqual(out.vz, 100, accuracy: 0.0001)
+    }
+
+    func testPeerMirrorIsInvolution() {
+        // Applying the mirror twice must restore the original (send-only safety net).
+        let zFar: CGFloat = 900
+        let p0 = PeerMirror.Pose(x: -17, y: 8, z: 600)
+        let p1 = PeerMirror.position(p0, zFar: zFar)
+        let p2 = PeerMirror.position(p1, zFar: zFar)
+        XCTAssertEqual(p2.x, p0.x, accuracy: 0.0001)
+        XCTAssertEqual(p2.y, p0.y, accuracy: 0.0001)
+        XCTAssertEqual(p2.z, p0.z, accuracy: 0.0001)
+
+        let v0 = PeerMirror.Velocity(vx: 5, vy: 2, vz: -80)
+        let v2 = PeerMirror.velocity(PeerMirror.velocity(v0))
+        XCTAssertEqual(v2.vx, v0.vx, accuracy: 0.0001)
+        XCTAssertEqual(v2.vy, v0.vy, accuracy: 0.0001)
+        XCTAssertEqual(v2.vz, v0.vz, accuracy: 0.0001)
+    }
+
+    func testPeerMirrorNearPlaneBecomesFar() {
+        let zFar: CGFloat = 900
+        let near = PeerMirror.position(.init(x: 0, y: 0, z: 0), zFar: zFar)
+        XCTAssertEqual(near.z, zFar, accuracy: 0.0001)
+        let far = PeerMirror.position(.init(x: 0, y: 0, z: zFar), zFar: zFar)
+        XCTAssertEqual(far.z, 0, accuracy: 0.0001)
+    }
 }
