@@ -168,3 +168,19 @@ TunnelPong/
 - Money/fleet rules in global Claude.md do **not** apply here; this is a local iOS game, not a trading bot.
 
 ---
+## 2026-07-23 — GitHub private repo (v1 push)
+
+**Actor:** Grok, at Brooks’s request (“commit and push v1 … as a private project”).
+
+| Item | Value |
+|------|--------|
+| Remote | `https://github.com/brooksmoore/TunnelPong` |
+| Visibility | **PRIVATE** |
+| Branch | `main` |
+| Commit | `5343398` — *Initial v1: tunnel Pong iOS game with audit fixes and tests.* |
+| Files in commit | 13 (app, tests, README, LEDGER, .gitignore, Xcode project/scheme) |
+| Not committed | `.DS_Store` (gitignored) |
+
+Working tree was clean after push. Clone with: `gh repo clone brooksmoore/TunnelPong` (auth required; private).
+
+---
