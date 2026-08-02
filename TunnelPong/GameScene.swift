@@ -528,12 +528,20 @@ final class GameScene: SKScene {
         py = max(-my, min(my, py))
     }
 
-    private func setTouchTarget(_ loc: CGPoint) {
-        // Screen → world at z = 0 is a straight offset from center (scale = 1),
-        // plus the occlusion offset so the paddle rides above the thumb.
+    private func setTouchTarget(_ loc: CGPoint, thumbOffset: Bool = true) {
+        // Screen → world at z = 0 is a straight offset from center (scale = 1).
+        // On phone, add occlusion offset so the paddle rides above the thumb.
+        // On Mac pointer, skip that so the paddle sits under the cursor.
         let wx = loc.x - proj.center.x
-        let wy = loc.y - proj.center.y + Config.touchOffsetY
+        let offset: CGFloat = thumbOffset ? Config.touchOffsetY : 0
+        let wy = loc.y - proj.center.y + offset
         touchTarget = CGPoint(x: wx, y: wy)
+    }
+
+    /// Mac Catalyst: paddle follows the mouse with no click held.
+    func pointerMoved(to loc: CGPoint) {
+        guard phase == .playing || phase == .levelTransition else { return }
+        setTouchTarget(loc, thumbOffset: false)
     }
 
     // MARK: - Ball
@@ -734,10 +742,17 @@ final class GameScene: SKScene {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        #if targetEnvironment(macCatalyst)
+        // Keep last aim; hover continues tracking without a click.
+        #else
         touchTarget = nil
+        #endif
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        #if targetEnvironment(macCatalyst)
+        #else
         touchTarget = nil
+        #endif
     }
 }

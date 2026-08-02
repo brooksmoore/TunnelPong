@@ -43,3 +43,6 @@ Carthage/Build/
 *.cer
 .env
 .env.*
+
+# Local Mac Catalyst builds
+.derivedData-mac/

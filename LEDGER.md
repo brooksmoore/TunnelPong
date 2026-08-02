@@ -267,3 +267,37 @@ only Xcode 13.1. Resolved by installing the toolchain below, then verifying.
   Silicon Mac. Still open from Grok's list: app icon, `PrivacyInfo.xcprivacy`.
 
 ---
+
+## 2026-08-01 — Sonnet external audit + Mac Catalyst desktop play (Grok)
+
+### External audit (Sonnet) — Grok verdict
+
+**Agree on the load-bearing finding:** v1 game code is genuinely solid (Config SSoT, correct projection clamp, z-crossing collisions, honest AI error, explicit state machine). The real problem is not messiness — it is **governance and forward scaffolding outrunning the only signal that matters**: does this feel good in a hand on a physical phone.
+
+Gate table already said all four criteria OPEN; that was correct. ~850 lines of process/v2 prep (ROADMAP, V2_DESIGN, PeerMirror + tests, LEDGER handoffs) for a game never device-played is the overshoot. PeerMirror inert = safe, not necessary. Same pattern as trading-bot adversarial review: confident scaffolding before the efficacy signal.
+
+**Nuance (not disagreement):**
+- Mac Catalyst desktop path added this session — cheaper than Simulator for Config/debug; **does not** satisfy gate #1 (no thumb, no device haptics, no 120Hz phone).
+- Hover-follow paddle on Mac is a desktop UX fix only.
+- `GameScene` ~758 lines: fine for solo v1; expect pain only if versus is bolted into the same file without split — still not urgent.
+- This machine had **0 codesign identities** at audit time → TestFlight is the right *idea* but blocked until Apple Developer team/signing is set up somewhere Brooks can archive.
+
+### What we will not do
+
+- Expand PeerMirror, Multipeer, or V2_DESIGN implementation until gate is green.
+- Soften bars or treat Mac play as “device proven.”
+
+### What we did this session (pre-audit + post)
+
+- Enabled Mac Catalyst; `bin/play-mac.sh` builds off-Desktop (avoids iCloud xattr codesign fail) and launches.
+- Mouse hover drives paddle without click-hold; thumb offset disabled for pointer.
+- Zip snapshot: `~/Downloads/TunnelPong.zip`.
+- STATUS.md rewritten to put phone → Config freeze → cold second person first; v2 prep explicitly “leave inert.”
+
+### Next human steps
+
+1. Apple Team + archive → TestFlight (or AltStore) onto physical iPhone.
+2. Play sessions; tune Config only.
+3. Freeze Config; second-person cold test.
+4. Then — and only then — open gate and implement v2 per existing design docs.
+
