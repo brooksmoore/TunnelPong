@@ -12,6 +12,28 @@ final class Audio {
     private var ambientPlayer: AVAudioPlayerNode?
     private var ambientBuffer: AVAudioPCMBuffer?
 
+    /// Every clip shares one format so a single pool of players can play all
+    /// of them without reconnecting.
+    private let sampleRate = 22_050.0
+    private lazy var format = AVAudioFormat(standardFormatWithSampleRate: sampleRate,
+                                            channels: 1)
+
+    /// Waveforms are synthesised once and reused. Without this, every wall
+    /// bounce rebuilt its buffer sample-by-sample on the main thread.
+    private struct ToneKey: Hashable {
+        let freq: Double
+        let dur: Double
+        let wave: Int
+    }
+    private var toneCache: [ToneKey: AVAudioPCMBuffer] = [:]
+
+    /// Fixed pool of players attached once. Attaching and detaching nodes on a
+    /// running engine per sound is expensive and can glitch the output, which
+    /// matters here because rallies fire several sounds a second.
+    private var pool: [AVAudioPlayerNode] = []
+    private var poolCursor = 0
+    private static let poolSize = 12
+
     private init() {
         mainMixer = engine.mainMixerNode
     }
@@ -26,6 +48,15 @@ final class Audio {
 
         mainMixer.outputVolume = 1
         ambientBuffer = makeDroneBuffer()
+
+        if let format {
+            for _ in 0..<Audio.poolSize {
+                let player = AVAudioPlayerNode()
+                engine.attach(player)
+                engine.connect(player, to: mainMixer, format: format)
+                pool.append(player)
+            }
+        }
 
         do {
             try engine.start()
@@ -99,7 +130,7 @@ final class Audio {
 
     // MARK: - Synthesis
 
-    private enum Wave { case sine, square, triangle, saw }
+    private enum Wave: Int { case sine, square, triangle, saw }
 
     private func blip(freq: Double, dur: Double, wave: Wave, vol: Float, delay: Double = 0) {
         prepare()
@@ -116,25 +147,38 @@ final class Audio {
     }
 
     private func playTone(freq: Double, dur: Double, wave: Wave, vol: Float) {
-        guard let buffer = makeToneBuffer(freq: freq, dur: dur, wave: wave, vol: vol) else { return }
-        let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: mainMixer, format: buffer.format)
-        player.scheduleBuffer(buffer, at: nil, options: []) { [weak self, weak player] in
-            guard let self, let player else { return }
-            DispatchQueue.main.async {
-                self.engine.detach(player)
-            }
+        guard engine.isRunning, !pool.isEmpty else { return }
+        let key = ToneKey(freq: freq, dur: dur, wave: wave.rawValue)
+        let buffer: AVAudioPCMBuffer
+        if let cached = toneCache[key] {
+            buffer = cached
+        } else {
+            // Amplitude 1.0 in the buffer; loudness comes from player.volume,
+            // so one cached waveform serves every volume it's played at.
+            guard let made = makeToneBuffer(freq: freq, dur: dur, wave: wave) else { return }
+            toneCache[key] = made
+            buffer = made
         }
+        // Round-robin, preferring an idle player so a busy one isn't cut off.
+        var chosen: AVAudioPlayerNode?
+        for i in 0..<pool.count {
+            let candidate = pool[(poolCursor + i) % pool.count]
+            if !candidate.isPlaying { chosen = candidate; poolCursor = (poolCursor + i + 1) % pool.count; break }
+        }
+        let player = chosen ?? pool[poolCursor]
+        if chosen == nil { poolCursor = (poolCursor + 1) % pool.count }
+
+        player.volume = max(0, min(1, vol))
+        player.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
         player.play()
     }
 
     private func makeDroneBuffer() -> AVAudioPCMBuffer? {
         // ~2s seamless-ish pad loop (A1 + E2 soft sines).
-        let sr = 22_050.0
+        let sr = sampleRate
         let seconds = 2.0
         let n = Int(sr * seconds)
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 1),
+        guard let format,
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(n)),
               let data = buffer.floatChannelData?[0]
         else { return nil }
@@ -156,11 +200,11 @@ final class Audio {
         return buffer
     }
 
-    private func makeToneBuffer(freq: Double, dur: Double, wave: Wave, vol: Float) -> AVAudioPCMBuffer? {
-        let sr = 22_050.0
+    private func makeToneBuffer(freq: Double, dur: Double, wave: Wave) -> AVAudioPCMBuffer? {
+        let sr = sampleRate
         let n = Int(dur * sr)
         guard n > 8,
-              let format = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 1),
+              let format,
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(n)),
               let data = buffer.floatChannelData?[0]
         else { return nil }
@@ -187,7 +231,7 @@ final class Audio {
             } else {
                 env = 1
             }
-            data[i] = Float(raw * Double(vol) * env * 0.4)
+            data[i] = Float(raw * env * 0.4)
         }
         return buffer
     }

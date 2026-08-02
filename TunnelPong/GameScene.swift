@@ -82,6 +82,11 @@ final class GameScene: SKScene {
     private var vignetteNode: SKSpriteNode!
     private var ballNode: SKNode!
     private var ballShadowNode: SKNode!
+    /// Discrete trail opacities, head → tail. Static so the update loop never
+    /// allocates to read them.
+    private static let trailAlphaSteps: [CGFloat] =
+        [Config.trailAlphaHead, 0.35, 0.22, 0.15, Config.trailAlphaTail]
+
     private var trailGhosts: [SKNode] = []
     private var trailHistory: [(x: CGFloat, y: CGFloat, z: CGFloat)] = []
     /// Inner layer of the ball that turns; see NodeFactory.ball().
@@ -1266,9 +1271,10 @@ final class GameScene: SKScene {
                 let s = proj.scale(z: h.z) * Config.ballDrawScale
                     * NodeFactory.lerp(Config.trailScaleHead, Config.trailScaleTail, t)
                 ghost.setScale(quantizeScale(s))
-                // Stepped trail alpha (3 levels) rather than continuous fade.
-                let steps: [CGFloat] = [Config.trailAlphaHead, 0.35, 0.22, 0.15, Config.trailAlphaTail]
-                ghost.alpha = steps[min(i, steps.count - 1)]
+                // Stepped trail alpha rather than a continuous fade. Hoisted to
+                // a stored constant — building this array inline allocated once
+                // per ghost per frame (~300 heap allocations/second).
+                ghost.alpha = GameScene.trailAlphaSteps[min(i, GameScene.trailAlphaSteps.count - 1)]
             } else {
                 ghost.isHidden = true
             }

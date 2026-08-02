@@ -475,3 +475,68 @@ modernly designed Game Boy Color game — retro but beautiful.
 - v2 gate still CLOSED.
 
 **Verified:** Mac Catalyst builds during session.
+
+## 2026-08-02 — Claude final v1 audit: app icon, audio/frame efficiency, device-ready
+
+**Actor:** Claude (Opus 5). Grok's polish pass committed as-is first (`563a3b4`).
+
+### Efficiency findings (both fixed)
+
+1. **Audio allocated and attached a node per sound.** `playTone` synthesised a
+   fresh PCM buffer sample-by-sample *and* called `engine.attach` +
+   `engine.connect` on the running engine for every hit, detaching async after.
+   In a rally that fires several times a second; attach/detach on a live
+   AVAudioEngine is expensive and can glitch output.
+   → Waveforms are now cached by (freq, dur, wave) and synthesised once;
+   amplitude is baked at 1.0 with loudness applied via `player.volume`, so one
+   buffer serves every volume. A fixed pool of 12 player nodes is attached once
+   at `prepare()` and reused round-robin, preferring an idle node.
+2. **Per-frame heap allocation in `renderWorld`.** The stepped trail-alpha array
+   was built inline inside the ghost loop — ~300 allocations/second at 60fps,
+   against the project's own "no allocations in the update loop" rule.
+   → Hoisted to `GameScene.trailAlphaSteps`.
+
+Noted, not changed: `trailHistory.insert(at: 0)` is O(n), but n = trailLength
+(5) so the shift is negligible.
+
+### App icon (was the last open v1 item)
+
+Generated, not drawn: `bin/make-icon.swift` renders a 1024px icon into
+`Assets.xcassets` — tunnel of concentric squares on the same wall ramp as
+`Config.wallColor`, corner rails to the vanishing point, neon-orange ball with a
+radial glow, deterministic stars. Ring count cut to 5 and the outer ring held
+inside 0.40 so it survives iOS's corner mask and stays legible at home-screen
+size. Re-run with `xcrun swift bin/make-icon.swift`.
+
+Wired `Assets.xcassets` into the project + `ASSETCATALOG_COMPILER_APPICON_NAME`.
+**Caught during wiring:** the new asset entries initially reused
+`A10000000000000000000009` / `A20000000000000000000009`, already taken by
+Grok's `Audio.swift` — duplicate pbxproj UUIDs. Re-keyed to `...000A`, verified
+no duplicates remain.
+
+### Verified
+
+- **iOS device (Release, generic/platform=iOS): BUILD SUCCEEDED** — this is the
+  configuration that matters for installing on hardware.
+- **Mac Catalyst: BUILD SUCCEEDED.**
+- A first device build failed on `AssetCatalogSimulatorAgent`; a clean derived
+  data directory cleared it. Transient, not a project defect.
+- **Unit tests were NOT re-run this pass** — Brooks asked for no simulators, and
+  the test target can't run on Catalyst (its macOS deployment target, 26.1,
+  exceeds this Mac's 15.7.7). The functions `CourtMathTests` covers were not
+  touched by this pass.
+
+### Notch / safe area (reviewed, unchanged)
+
+Hearts sit in the Dynamic Island *ear* band when `topSafe >= 44`; level and
+score sit fully below the safe top. Checked the corner-radius geometry: at the
+hearts' height on a Pro Max the screen curve intrudes ~12pt, and `sidePad` is
+18pt, so the hearts clear it. Pause button sits ~44pt off the bottom, above the
+home-indicator gesture strip.
+
+### Still open (deliberately)
+
+`PrivacyInfo.xcprivacy` (App Store only, not needed for personal install);
+deployment target is iOS 17, which excludes iPhone X/8 (they cap at iOS 16).
+
+---
