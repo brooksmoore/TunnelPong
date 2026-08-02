@@ -228,13 +228,19 @@ final class GameScene: SKScene {
         clampPlayer()
         clampOpponent()
         clampBallXY()
+        let mx = max(0, halfW - Config.playerPaddleHalfW)
+        let my = max(0, halfH - Config.playerPaddleHalfH)
         if var t = touchTarget {
-            let mx = max(0, halfW - Config.playerPaddleHalfW)
-            let my = max(0, halfH - Config.playerPaddleHalfH)
             t.x = max(-mx, min(mx, t.x))
             t.y = max(-my, min(my, t.y))
             touchTarget = t
         }
+        // The relative-drag origin stores a paddle position too. Rotating with
+        // a finger down leaves it describing the *old* court, so the next drag
+        // update would solve to a point outside the new one and snap the paddle
+        // to a wall before the elastic re-anchor caught up.
+        dragAnchorPaddle.x = max(-mx, min(mx, dragAnchorPaddle.x))
+        dragAnchorPaddle.y = max(-my, min(my, dragAnchorPaddle.y))
         rebuildBackdrop()
         rebuildTunnelGeometry()
         layoutHUD()

@@ -303,7 +303,7 @@ Gate table already said all four criteria OPEN; that was correct. ~850 lines of 
 
 ## 2026-08-01 — First physical iPhone run
 
-Brooks installed and launched v1 on **BCM 16 Pro Max (iOS 27)** via Xcode cable + Apple Development signing (`personal Apple ID`). Initial miss was run destination set to Simulator; after switching destination to the device and trusting the developer profile in Settings → General → VPN & Device Management, app opened. Brooks: “super cool.”
+Brooks installed and launched v1 on **BCM 16 Pro Max (iOS 27)** via Xcode cable + Apple Development signing (personal Apple ID). Initial miss was run destination set to Simulator; after switching destination to the device and trusting the developer profile in Settings → General → VPN & Device Management, app opened. Brooks: “super cool.”
 
 Gate #1 → **IN PROGRESS** (need multiple sessions, not one launch). Still do not start v2.
 

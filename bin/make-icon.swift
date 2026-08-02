@@ -1,10 +1,17 @@
 #!/usr/bin/env swift
 //
 // Draws the CyberPong app icon and writes it into the asset catalog.
-// The icon is generated, not hand-drawn, so it stays reproducible code like
-// everything else in this project.
+// Generated, not hand-drawn, so the icon stays reproducible code like the rest
+// of the project.
 //
 //   xcrun swift bin/make-icon.swift
+//
+// Style rules, matched to the game:
+//   * Everything lands on a coarse pixel grid — the icon is built from blocks,
+//     not smooth vectors, so it reads 8-bit at any size.
+//   * Tunnel rings are rounded rects using the same corner proportion as the
+//     game (and as iOS itself), stepped through the grid.
+//   * Neon pink wire on black, one orange ball. Same palette as play.
 //
 import AppKit
 import CoreGraphics
@@ -14,25 +21,19 @@ let side = 1024
 let out = FileManager.default.currentDirectoryPath
     + "/TunnelPong/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
+/// Icon "pixel" — every shape snaps to this so nothing renders sub-block.
+let px: CGFloat = 16
+func snap(_ v: CGFloat) -> CGFloat { (v / px).rounded() * px }
+
 func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> CGColor {
     CGColor(red: r, green: g, blue: b, alpha: a)
 }
 
-// Same wall ramp as Config.wallColor: near hot pink → far deep indigo.
-let ramp: [(CGFloat, CGFloat, CGFloat)] = [
-    (1.00, 0.40, 0.52),
-    (0.98, 0.24, 0.60),
-    (0.72, 0.22, 0.78),
-    (0.42, 0.18, 0.70),
-    (0.20, 0.10, 0.44),
-]
-func rampColor(_ t: CGFloat) -> CGColor {
-    let c = max(0, min(1, t)) * CGFloat(ramp.count - 1)
-    let i = min(Int(c), ramp.count - 2)
-    let f = c - CGFloat(i)
-    let a = ramp[i], b = ramp[i + 1]
-    return rgb(a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f, a.2 + (b.2 - a.2) * f)
-}
+// Game palette.
+let neonPink = rgb(1.00, 0.28, 0.58)
+let deepPink = rgb(0.85, 0.18, 0.48)
+let ballOrange = rgb(1.00, 0.48, 0.09)
+let ballHot = rgb(1.00, 0.80, 0.42)
 
 guard let ctx = CGContext(data: nil, width: side, height: side,
                           bitsPerComponent: 8, bytesPerRow: 0,
@@ -40,73 +41,121 @@ guard let ctx = CGContext(data: nil, width: side, height: side,
                           bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
 else { fatalError("no context") }
 
+// Hard edges everywhere: no antialiasing is what makes blocks look like blocks.
+ctx.setShouldAntialias(false)
+ctx.interpolationQuality = .none
+
 let S = CGFloat(side)
 ctx.setFillColor(rgb(0, 0, 0))
 ctx.fill(CGRect(x: 0, y: 0, width: S, height: S))
 
-// A few stars, deterministic.
+// Starfield, deterministic, snapped to the grid.
 var seed: UInt64 = 0xC0FFEE
 func rnd() -> CGFloat {
     seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
     return CGFloat(seed % 100_000) / 100_000
 }
-for _ in 0..<70 {
-    let x = rnd() * S, y = rnd() * S, r = 1.5 + rnd() * 3
-    ctx.setFillColor(rgb(1, 1, 1, 0.20 + rnd() * 0.6))
-    ctx.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
+for _ in 0..<46 {
+    let x = snap(rnd() * S), y = snap(rnd() * S)
+    ctx.setFillColor(rgb(1, 1, 1, 0.25 + rnd() * 0.55))
+    ctx.fill(CGRect(x: x, y: y, width: px, height: px))
 }
 
-// Tunnel: concentric squares receding to the centre. Square corners and a
-// small ring count keep it legible at home-screen size, where the real
-// tunnel's 9 rings would turn to mush.
-let center = CGPoint(x: S / 2, y: S / 2)
-// Outer ring stays inside 0.40 so iOS's rounded-corner mask never clips it.
-let rings = 5
-for i in 0..<rings {
-    let t = CGFloat(i) / CGFloat(rings - 1)
-    let half = S * (0.40 - t * 0.325)
-    ctx.setStrokeColor(rampColor(t))
-    ctx.setLineWidth(S * (0.024 - t * 0.011))
-    ctx.stroke(CGRect(x: center.x - half, y: center.y - half,
-                      width: half * 2, height: half * 2))
+/// Stroke a rounded rect as a ring of grid blocks — a blocky outline rather
+/// than a smooth path. Corner radius uses the game's fraction of width, which
+/// is also iOS's own screen-corner proportion.
+func blockRing(halfW: CGFloat, halfH: CGFloat, weight: CGFloat, color: CGColor) {
+    let cx = S / 2, cy = S / 2
+    let w = snap(halfW), h = snap(halfH)
+    // 0.125 of full width, matching Config.ringCornerFrac; capped so small
+    // rings stay rects instead of collapsing to blobs.
+    let r = snap(min(0.125 * (w * 2), min(w, h) * 0.32))
+    ctx.setFillColor(color)
+
+    var y = -h
+    while y <= h {
+        var x = -w
+        while x <= w {
+            let ax = abs(x), ay = abs(y)
+            // Distance outside the straight edges, measured into the corner box.
+            let dx = ax - (w - r), dy = ay - (h - r)
+            let onEdge: Bool
+            if dx > 0 && dy > 0 {
+                // Corner quadrant: keep blocks within `weight` of the arc.
+                let d = sqrt(dx * dx + dy * dy)
+                onEdge = d <= r && d > r - weight
+            } else {
+                onEdge = (ax > w - weight && ay <= h) || (ay > h - weight && ax <= w)
+            }
+            // Never draw outside the rounded silhouette.
+            let inside = (dx <= 0 || dy <= 0) ? (ax <= w && ay <= h)
+                                              : sqrt(dx * dx + dy * dy) <= r
+            if onEdge && inside {
+                ctx.fill(CGRect(x: cx + x, y: cy + y, width: px, height: px))
+            }
+            x += px
+        }
+        y += px
+    }
 }
 
-// Corner rails, drawn from the outer ring toward the vanishing point.
-ctx.setLineWidth(S * 0.008)
-ctx.setStrokeColor(rgb(0.72, 0.22, 0.78, 0.55))
-let outer = S * 0.40, inner = S * 0.075
+// Four rings receding toward the centre. Fewer, chunkier rings than the game
+// uses — nine would turn to mush at home-screen size.
+let rings: [(CGFloat, CGFloat, CGColor)] = [
+    (0.400, px * 2, neonPink),
+    (0.285, px * 2, neonPink),
+    (0.190, px,     deepPink),
+    (0.115, px,     deepPink),
+]
+for (frac, weight, color) in rings {
+    blockRing(halfW: S * frac, halfH: S * frac * 1.06, weight: weight, color: color)
+}
+
+/// Where a rail meets a rounded ring: the 45° point on the corner arc, inset
+/// from the sharp corner by r·(1 − 1/√2). Aiming at the sharp corner instead
+/// leaves the rail floating outside the ring — same bug the game had.
+func railAnchor(frac: CGFloat) -> CGPoint {
+    let w = snap(S * frac)
+    let h = snap(S * frac * 1.06)
+    let r = snap(min(0.125 * (w * 2), min(w, h) * 0.32))
+    let inset = r * (1 - 1 / sqrt(2.0))
+    return CGPoint(x: w - inset, y: h - inset)
+}
+
+// Corner rails as stepped blocks, outer ring corner → innermost ring corner.
+ctx.setFillColor(deepPink)
+let a0 = railAnchor(frac: 0.400)
+let a1 = railAnchor(frac: 0.115)
 for (sx, sy) in [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)] {
-    ctx.move(to: CGPoint(x: center.x + CGFloat(sx) * outer,
-                         y: center.y + CGFloat(sy) * outer))
-    ctx.addLine(to: CGPoint(x: center.x + CGFloat(sx) * inner,
-                            y: center.y + CGFloat(sy) * inner))
+    var t: CGFloat = 0
+    while t <= 1.0 {
+        let x = snap(CGFloat(sx) * (a0.x + (a1.x - a0.x) * t))
+        let y = snap(CGFloat(sy) * (a0.y + (a1.y - a0.y) * t))
+        ctx.fill(CGRect(x: S / 2 + x, y: S / 2 + y, width: px, height: px))
+        t += 0.015
+    }
 }
-ctx.strokePath()
 
-// The ball: the one warm element, offset so the icon isn't dead symmetrical.
-let ballR = S * 0.095
-let ballC = CGPoint(x: center.x + S * 0.062, y: center.y - S * 0.045)
-// Radial falloff, not a flat disc — a constant-alpha circle over black just
-// reads as an opaque brown blob.
-if let glow = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                         colors: [rgb(1.0, 0.48, 0.09, 0.55),
-                                  rgb(1.0, 0.35, 0.06, 0.18),
-                                  rgb(1.0, 0.30, 0.05, 0.0)] as CFArray,
-                         locations: [0.0, 0.45, 1.0]) {
-    ctx.saveGState()
-    ctx.drawRadialGradient(glow, startCenter: ballC, startRadius: ballR * 0.6,
-                           endCenter: ballC, endRadius: ballR * 2.6,
-                           options: [])
-    ctx.restoreGState()
+/// Filled disc drawn as blocks.
+func blockDisc(cx: CGFloat, cy: CGFloat, radius: CGFloat, color: CGColor) {
+    ctx.setFillColor(color)
+    var y = -radius
+    while y <= radius {
+        var x = -radius
+        while x <= radius {
+            if sqrt(x * x + y * y) <= radius {
+                ctx.fill(CGRect(x: snap(cx + x), y: snap(cy + y), width: px, height: px))
+            }
+            x += px
+        }
+        y += px
+    }
 }
-ctx.setFillColor(rgb(1.0, 0.48, 0.09))
-ctx.fillEllipse(in: CGRect(x: ballC.x - ballR, y: ballC.y - ballR,
-                           width: ballR * 2, height: ballR * 2))
-ctx.setFillColor(rgb(1.0, 0.80, 0.42))
-let coreR = ballR * 0.38
-ctx.fillEllipse(in: CGRect(x: ballC.x - coreR - ballR * 0.22,
-                           y: ballC.y - coreR + ballR * 0.24,
-                           width: coreR * 2, height: coreR * 2))
+
+// The ball: one warm element, offset so the icon isn't dead symmetrical.
+let ballC = CGPoint(x: snap(S / 2 + S * 0.055), y: snap(S / 2 - S * 0.040))
+blockDisc(cx: ballC.x, cy: ballC.y, radius: S * 0.105, color: ballOrange)
+blockDisc(cx: ballC.x - px * 2, cy: ballC.y + px * 2, radius: S * 0.038, color: ballHot)
 
 guard let image = ctx.makeImage() else { fatalError("no image") }
 let rep = NSBitmapImageRep(cgImage: image)
