@@ -7,8 +7,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         #if targetEnvironment(macCatalyst)
-        // Phone-shaped window for desktop play (no Simulator).
-        let phoneSize = CGSize(width: 390, height: 844)
+        // Tall phone-shaped window (extra height so titlebar doesn't clip HUD).
+        let phoneSize = CGSize(width: 400, height: 920)
         let window = UIWindow(frame: CGRect(origin: .zero, size: phoneSize))
         #else
         let window = UIWindow(frame: UIScreen.main.bounds)
@@ -18,11 +18,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         self.window = window
 
         #if targetEnvironment(macCatalyst)
-        // Phone-shaped bounds; user can still resize within min/max.
         if let scene = window.windowScene {
-            scene.sizeRestrictions?.minimumSize = CGSize(width: 320, height: 568)
-            scene.sizeRestrictions?.maximumSize = CGSize(width: 500, height: 1100)
-            scene.title = "Tunnel Pong"
+            scene.sizeRestrictions?.minimumSize = CGSize(width: 340, height: 700)
+            scene.sizeRestrictions?.maximumSize = CGSize(width: 520, height: 1200)
+            scene.title = "CyberPong"
         }
         #endif
         return true

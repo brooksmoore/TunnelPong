@@ -301,3 +301,37 @@ Gate table already said all four criteria OPEN; that was correct. ~850 lines of 
 3. Freeze Config; second-person cold test.
 4. Then — and only then — open gate and implement v2 per existing design docs.
 
+## 2026-08-01 — First physical iPhone run
+
+Brooks installed and launched v1 on **BCM 16 Pro Max (iOS 27)** via Xcode cable + Apple Development signing (`personal Apple ID`). Initial miss was run destination set to Simulator; after switching destination to the device and trusting the developer profile in Settings → General → VPN & Device Management, app opened. Brooks: “super cool.”
+
+Gate #1 → **IN PROGRESS** (need multiple sessions, not one launch). Still do not start v2.
+
+## 2026-08-01 — CyberPong v1 wrap (retrowave + campaign)
+
+**Rename / theme:** Product title **CyberPong**. Majority black + retrowave from desktop refs c1.jpg / c2.jpg / c3.png — electric cyan player, hot magenta opponent, sunset orange ball, violet tunnel wire. Condensed cyberpunk type (Avenir Next Condensed*). Title wordmark CYBER / PONG.
+
+**Gameplay polish this pass:** Paddle strike flash (alpha → ~0.12 then recover). 10-level linear difficulty already in; wrap declares v1 solo complete for feature scope.
+
+**Discipline:** STATUS marks v1 WRAPPED. v2 gate still CLOSED — no Multipeer / PeerMirror wiring until multi-session device play + Config freeze + cold second person.
+
+**Play:** Mac `bin/play-mac.sh`; phone cable install proven earlier this session.
+
+## 2026-08-01 — Opponent center reset + chrome layout (pre-Claude review)
+
+### Gameplay
+- **Every point / serve:** opponent paddle snaps to world center `(0,0)`; AI does not move while `!ballLive` (fixes crawl-back during user serve).
+- User still serves first each round; ball still fixed center until paddle strike.
+
+### Layout
+- Mac: `macTitlebarInset` (40) + taller default window (400×920); HUD and title wordmark laid out under chrome via `applyChromeLayout()`.
+- iOS: HUD respects safe-area top/bottom (notch / home indicator) with `hudTopPad` / `hudBottomPad`; async re-layout after insets settle.
+- Court projection remains screen-centered; only chrome moves into the safe band.
+
+### Docs for Claude review
+- Added **MEMORY.md** (durable architecture).
+- STATUS rewritten for review handoff.
+- v1 remains WRAPPED; v2 gate still CLOSED.
+
+### Review ask
+Claude: verify serve/AI reset, Catalyst/iOS chrome, L1–L10 difficulty leash, and that nothing multiplayer was half-wired.

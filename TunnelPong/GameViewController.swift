@@ -18,6 +18,8 @@ final class GameViewController: UIViewController {
         super.viewDidLayoutSubviews()
         guard let skView = view as? SKView, skView.bounds.width > 0 else { return }
 
+        let insets = effectiveSafeInsets(for: skView)
+
         // First layout: present the scene at the real window size.
         if !didPresent {
             didPresent = true
@@ -28,11 +30,17 @@ final class GameViewController: UIViewController {
             skView.preferredFramesPerSecond = 120   // ProMotion runs 120; others clamp to 60
             #endif
             let scene = GameScene(size: skView.bounds.size)
-            scene.safeInsets = skView.safeAreaInsets
+            scene.safeInsets = insets
             scene.scaleMode = .resizeFill
             scene.backgroundColor = .black
             skView.presentScene(scene)
             gameScene = scene
+            // Second pass after safe-area settles (notch / Mac titlebar).
+            DispatchQueue.main.async { [weak self, weak skView, weak scene] in
+                guard let self, let skView, let scene else { return }
+                scene.safeInsets = self.effectiveSafeInsets(for: skView)
+                scene.applyChromeLayout()
+            }
 
             #if targetEnvironment(macCatalyst)
             // Paddle follows mouse without holding click (trackpad-friendly).
@@ -42,11 +50,30 @@ final class GameViewController: UIViewController {
             return
         }
 
-        // Mac: keep scene size in sync when the window is resized.
-        if let scene = gameScene, scene.size != skView.bounds.size {
-            scene.size = skView.bounds.size
-            scene.safeInsets = skView.safeAreaInsets
+        // Resize / rotation / safe-area updates: keep scene + chrome in sync.
+        if let scene = gameScene {
+            let sizeChanged = scene.size != skView.bounds.size
+            scene.safeInsets = insets
+            if sizeChanged {
+                scene.size = skView.bounds.size
+            }
+            scene.applyChromeLayout()
         }
+    }
+
+    /// Notch / home indicator on phone; titlebar reserve on Mac Catalyst.
+    private func effectiveSafeInsets(for skView: SKView) -> UIEdgeInsets {
+        var insets = skView.safeAreaInsets
+        // Prefer view controller's safe area (includes additionalSafeAreaInsets).
+        let vcInsets = view.safeAreaInsets
+        insets.top = max(insets.top, vcInsets.top)
+        insets.bottom = max(insets.bottom, vcInsets.bottom)
+        insets.left = max(insets.left, vcInsets.left)
+        insets.right = max(insets.right, vcInsets.right)
+        #if targetEnvironment(macCatalyst)
+        insets.top = max(insets.top, Config.macTitlebarInset)
+        #endif
+        return insets
     }
 
     #if targetEnvironment(macCatalyst)

@@ -41,8 +41,19 @@ final class GameScene: SKScene {
 
     private var bx: CGFloat = 0, by: CGFloat = 0, bz: CGFloat = 0
     private var vx: CGFloat = 0, vy: CGFloat = 0, vz: CGFloat = 0
-    private var ballLive = false           // false while waiting to serve
+    private var ballLive = false           // false while waiting to serve / frozen
     private var serveCountdown: CGFloat = 0
+    /// You serve first each round; after a miss the opponent auto-serves.
+    private enum Server { case player, opponent }
+    private var nextServer: Server = .player
+    private var awaitingPlayerServe = false
+    /// Point just scored — ball held on the plane with a callout.
+    private var pointFreezeCountdown: CGFloat = 0
+    private var pendingPointWin = false   // true = you scored, false = you lost a life
+    // Serve strike tracking (Mac: click/drag on ball; iOS: drag across ball).
+    private var serveDragPrev: CGPoint?
+    private var serveDragDelta: CGPoint = .zero
+    private var serveTouchedBall = false
 
     // MARK: - Paddles (world coordinates)
 
@@ -64,7 +75,7 @@ final class GameScene: SKScene {
     private let worldNode = SKNode()
     private var rings: [SKShapeNode] = []
     private var ringPulses: [SKAction] = []
-    private var ballNode: SKShapeNode!
+    private var ballNode: SKNode!
     private var playerPaddleNode: SKShapeNode!
     private var oppPaddleNode: SKShapeNode!
 
@@ -74,12 +85,15 @@ final class GameScene: SKScene {
     private var hudPlayerLives: SKLabelNode!
     private var hudOppLives: SKLabelNode!
     private var pauseButton: SKLabelNode!
+    private var serveHintLabel: SKLabelNode!
+    private var pointCalloutLabel: SKLabelNode!
 
     private var titleLayer: SKNode!
     private var titleHighLabel: SKLabelNode!
     private var pauseLayer: SKNode!
     private var quitLabel: SKLabelNode!
     private var gameOverLayer: SKNode!
+    private var goTitleLabel: SKLabelNode!
     private var goScoreLabel: SKLabelNode!
     private var goHighLabel: SKLabelNode!
     private var transitionLabel: SKLabelNode!
@@ -102,6 +116,7 @@ final class GameScene: SKScene {
         buildEffects()
         buildHUD()
         buildOverlays()
+        applyChromeLayout()
 
         Haptics.shared.prepare()
         NotificationCenter.default.addObserver(
@@ -109,6 +124,76 @@ final class GameScene: SKScene {
             name: UIApplication.willResignActiveNotification, object: nil)
 
         showTitle()
+    }
+
+    /// Top inset under notch / Dynamic Island / Mac titlebar.
+    private var layoutTopInset: CGFloat {
+        max(safeInsets.top, 0) + Config.hudTopPad
+    }
+
+    private var layoutBottomInset: CGFloat {
+        max(safeInsets.bottom, 0) + Config.hudBottomPad
+    }
+
+    /// Call after safeInsets or size change (Mac resize, notch, titlebar).
+    /// Court geometry stays screen-centered; only chrome (HUD / title) moves into the safe band.
+    func applyChromeLayout() {
+        proj.center = CGPoint(x: size.width / 2, y: size.height / 2)
+        halfW = size.width / 2 * Config.courtWidthFactor
+        halfH = size.height / 2 * Config.courtHeightFactor
+        // Keep tunnel rings aligned to current center if they already exist.
+        for node in rings {
+            node.position = proj.center
+        }
+        layoutHUD()
+        layoutOverlays()
+        if flashNode != nil {
+            flashNode.position = proj.center
+            flashNode.size = CGSize(width: size.width * 1.2, height: size.height * 1.2)
+        }
+        renderWorld()
+    }
+
+    private func layoutHUD() {
+        guard hudNode != nil, hudPlayerLives != nil else { return }
+        let topY = size.height - layoutTopInset
+        let bottomY = layoutBottomInset
+        let sidePad = max(safeInsets.left, safeInsets.right, 12) + 10
+        let cx = size.width / 2
+
+        hudPlayerLives.position = CGPoint(x: sidePad, y: topY)
+        hudOppLives.position = CGPoint(x: size.width - sidePad, y: topY)
+        hudLevelLabel.position = CGPoint(x: cx, y: topY)
+        hudScoreLabel.position = CGPoint(x: cx, y: topY - 26)
+        pauseButton.position = CGPoint(x: size.width - sidePad - 10, y: bottomY)
+        serveHintLabel.position = CGPoint(x: cx, y: bottomY + 36)
+        if pointCalloutLabel != nil {
+            pointCalloutLabel.position = CGPoint(x: cx, y: size.height / 2 + 40)
+        }
+    }
+
+    private func layoutOverlays() {
+        guard titleLayer != nil else { return }
+        let cx = size.width / 2
+        let cy = size.height / 2
+        // Wordmark sits below safe top so Mac titlebar / iOS notch never clip it.
+        let maxTop = size.height - layoutTopInset - 36
+        let cyberY = min(cy + 130, maxTop)
+        let pongY = cyberY - 62
+        let kids = titleLayer.children
+        if kids.count >= 5 {
+            kids[0].position = CGPoint(x: cx, y: (cyberY + pongY) / 2) // glow
+            kids[1].position = CGPoint(x: cx, y: cyberY)                 // CYBER
+            kids[2].position = CGPoint(x: cx, y: pongY)                  // PONG
+            kids[3].position = CGPoint(x: cx, y: cy - 50)                // tap
+            kids[4].position = CGPoint(x: cx, y: cy - 110)               // high
+        }
+        if transitionLabel != nil {
+            transitionLabel.position = CGPoint(x: cx, y: cy + 30)
+        }
+        goTitleLabel?.position = CGPoint(x: cx, y: cy + 100)
+        goScoreLabel?.position = CGPoint(x: cx, y: cy + 30)
+        goHighLabel?.position = CGPoint(x: cx, y: cy - 10)
     }
 
     deinit {
@@ -195,50 +280,56 @@ final class GameScene: SKScene {
         hudNode.zPosition = 90
         addChild(hudNode)
 
-        // Keep labels clear of notch / Dynamic Island / home indicator.
-        let topPad = max(safeInsets.top, 20) + 18
-        let bottomPad = max(safeInsets.bottom, 12) + 18
-        let sidePad = max(safeInsets.left, safeInsets.right, 12) + 10
-        let topY = size.height - topPad
-
-        hudPlayerLives = NodeFactory.label("", size: 15, color: Config.playerColor, alpha: 0.55)
+        // Positions set by layoutHUD() via applyChromeLayout() (safe-area aware).
+        hudPlayerLives = NodeFactory.hudLabel("", size: 15, color: Config.playerColor, alpha: 0.7)
         hudPlayerLives.horizontalAlignmentMode = .left
-        hudPlayerLives.position = CGPoint(x: sidePad, y: topY)
         hudNode.addChild(hudPlayerLives)
 
-        hudOppLives = NodeFactory.label("", size: 13, color: Config.opponentColor, alpha: 0.55)
+        hudOppLives = NodeFactory.hudLabel("", size: 13, color: Config.opponentColor, alpha: 0.7)
         hudOppLives.horizontalAlignmentMode = .right
-        hudOppLives.position = CGPoint(x: size.width - sidePad, y: topY)
         hudNode.addChild(hudOppLives)
 
-        hudLevelLabel = NodeFactory.label("LV 1", size: 15, color: Config.hudColor, alpha: 0.6)
-        hudLevelLabel.position = CGPoint(x: proj.center.x, y: topY)
+        hudLevelLabel = NodeFactory.hudLabel("LV 1", size: 15, color: Config.hudColor, alpha: 0.65)
         hudNode.addChild(hudLevelLabel)
 
-        hudScoreLabel = NodeFactory.label("0", size: 20, color: Config.hudColor, alpha: 0.8)
-        hudScoreLabel.position = CGPoint(x: proj.center.x, y: topY - 26)
+        hudScoreLabel = NodeFactory.hudLabel("0", size: 20, color: Config.hudColor, alpha: 0.85)
         hudNode.addChild(hudScoreLabel)
 
-        pauseButton = NodeFactory.label("❚❚", size: 17, color: Config.hudColor, alpha: 0.35)
-        pauseButton.position = CGPoint(x: size.width - sidePad - 10, y: bottomPad)
+        pauseButton = NodeFactory.hudLabel("❚❚", size: 17, color: Config.hudColor, alpha: 0.4)
         hudNode.addChild(pauseButton)
+
+        serveHintLabel = NodeFactory.hudLabel("CLICK TO SERVE", size: 15, color: Config.titleAccent, alpha: 0.9)
+        serveHintLabel.isHidden = true
+        hudNode.addChild(serveHintLabel)
+
+        pointCalloutLabel = NodeFactory.titleLabel("", size: 32, color: .white)
+        pointCalloutLabel.isHidden = true
+        pointCalloutLabel.zPosition = 95
+        addChild(pointCalloutLabel)
     }
 
     private func buildOverlays() {
         let cx = proj.center.x
         let cy = proj.center.y
 
-        // Title
+        // Title — CyberPong (retrowave; majority black)
         titleLayer = SKNode()
         titleLayer.zPosition = 100
         addChild(titleLayer)
-        titleLayer.addChild(place(NodeFactory.label("TUNNEL", size: 56, color: Config.playerColor), cx, cy + 150))
-        titleLayer.addChild(place(NodeFactory.label("PONG", size: 56, color: .white), cx, cy + 88))
-        let tap = NodeFactory.label("TAP TO START", size: 19, color: .white, alpha: 0.8)
+        // Soft magenta horizon glow behind the wordmark (c3 peak energy).
+        let glow = SKShapeNode(circleOfRadius: min(size.width, size.height) * 0.28)
+        glow.fillColor = Config.titleAccent.withAlphaComponent(0.12)
+        glow.strokeColor = .clear
+        glow.position = CGPoint(x: cx, y: cy + 100)
+        glow.zPosition = -1
+        titleLayer.addChild(glow)
+        titleLayer.addChild(place(NodeFactory.titleLabel("CYBER", size: 58, color: Config.playerColor), cx, cy + 148))
+        titleLayer.addChild(place(NodeFactory.titleLabel("PONG", size: 58, color: Config.titleAccent), cx, cy + 86))
+        let tap = NodeFactory.hudLabel("TAP TO START", size: 18, color: .white, alpha: 0.85)
         tap.position = CGPoint(x: cx, y: cy - 50)
         tap.run(pulseForever())
         titleLayer.addChild(tap)
-        titleHighLabel = NodeFactory.label("HIGH SCORE 0", size: 15, color: Config.hudColor, alpha: 0.5)
+        titleHighLabel = NodeFactory.hudLabel("HIGH SCORE 0", size: 14, color: Config.hudColor, alpha: 0.55)
         titleHighLabel.position = CGPoint(x: cx, y: cy - 120)
         titleLayer.addChild(titleHighLabel)
 
@@ -248,27 +339,29 @@ final class GameScene: SKScene {
         let dim = SKSpriteNode(color: .black,
                                size: CGSize(width: size.width * 1.2, height: size.height * 1.2))
         dim.position = proj.center
-        dim.alpha = 0.6
+        dim.alpha = 0.7
         pauseLayer.addChild(dim)
-        pauseLayer.addChild(place(NodeFactory.label("PAUSED", size: 34, color: .white), cx, cy + 70))
-        pauseLayer.addChild(place(NodeFactory.label("TAP TO RESUME", size: 17, color: .white, alpha: 0.7), cx, cy))
-        quitLabel = NodeFactory.label("QUIT", size: 20, color: Config.opponentColor, alpha: 0.9)
+        pauseLayer.addChild(place(NodeFactory.titleLabel("PAUSED", size: 36, color: Config.playerColor), cx, cy + 70))
+        pauseLayer.addChild(place(NodeFactory.hudLabel("TAP TO RESUME", size: 16, color: .white, alpha: 0.75), cx, cy))
+        quitLabel = NodeFactory.hudLabel("QUIT", size: 20, color: Config.opponentColor, alpha: 0.95)
         quitLabel.position = CGPoint(x: cx, y: cy - 110)
         pauseLayer.addChild(quitLabel)
         pauseLayer.isHidden = true
         addChild(pauseLayer)
 
-        // Game over
+        // Game over / win
         gameOverLayer = SKNode()
         gameOverLayer.zPosition = 100
-        gameOverLayer.addChild(place(NodeFactory.label("GAME OVER", size: 40, color: .white), cx, cy + 120))
-        goScoreLabel = NodeFactory.label("SCORE 0", size: 22, color: Config.hudColor)
+        goTitleLabel = NodeFactory.titleLabel("GAME OVER", size: 40, color: .white)
+        goTitleLabel.position = CGPoint(x: cx, y: cy + 120)
+        gameOverLayer.addChild(goTitleLabel)
+        goScoreLabel = NodeFactory.hudLabel("SCORE 0", size: 22, color: Config.hudColor)
         goScoreLabel.position = CGPoint(x: cx, y: cy + 40)
         gameOverLayer.addChild(goScoreLabel)
-        goHighLabel = NodeFactory.label("HIGH SCORE 0", size: 16, color: Config.hudColor, alpha: 0.6)
+        goHighLabel = NodeFactory.hudLabel("HIGH SCORE 0", size: 15, color: Config.hudColor, alpha: 0.65)
         goHighLabel.position = CGPoint(x: cx, y: cy)
         gameOverLayer.addChild(goHighLabel)
-        let replay = NodeFactory.label("TAP TO REPLAY", size: 19, color: .white, alpha: 0.8)
+        let replay = NodeFactory.hudLabel("TAP TO REPLAY", size: 18, color: .white, alpha: 0.85)
         replay.position = CGPoint(x: cx, y: cy - 90)
         replay.run(pulseForever())
         gameOverLayer.addChild(replay)
@@ -276,7 +369,7 @@ final class GameScene: SKScene {
         addChild(gameOverLayer)
 
         // Level transition
-        transitionLabel = NodeFactory.label("LEVEL 2", size: 40, color: Config.playerColor)
+        transitionLabel = NodeFactory.titleLabel("LEVEL 2", size: 40, color: Config.playerColor)
         transitionLabel.position = CGPoint(x: cx, y: cy + 30)
         transitionLabel.zPosition = 100
         transitionLabel.isHidden = true
@@ -296,25 +389,65 @@ final class GameScene: SKScene {
         return SKAction.repeatForever(SKAction.sequence([out, back]))
     }
 
-    // MARK: - Difficulty formulas (all driven by level number)
+    // MARK: - Difficulty (linear L1→L10; player paddle never ramps)
+
+    /// 0 at L1, 1 at L10.
+    private func difficultyT() -> CGFloat { Config.difficultyT(level) }
 
     private func levelBallSpeed() -> CGFloat {
-        min(Config.ballBaseSpeed * (1 + Config.ballSpeedPerLevel * CGFloat(level - 1)),
+        min(Config.lerp(Config.ballSpeedL1, Config.ballSpeedL10, difficultyT()),
             Config.ballMaxSpeed)
+    }
+
+    private func rallyIncrement() -> CGFloat {
+        Config.lerp(Config.rallyIncL1, Config.rallyIncL10, difficultyT())
     }
 
     private func targetSpeed() -> CGFloat {
-        min(levelBallSpeed() + CGFloat(rallyHits) * Config.ballRallyIncrement,
+        min(levelBallSpeed() + CGFloat(rallyHits) * rallyIncrement(),
             Config.ballMaxSpeed)
     }
 
+    /// Max |vx/vy| the ball can carry at current speed given minVzFraction.
+    private func ballMaxLateralSpeed() -> CGFloat {
+        let s = targetSpeed()
+        let f = Config.minVzFraction
+        return s * sqrt(max(0, 1 - f * f))
+    }
+
+    /// AI XY: linear raw speed, hard-leashed to a rising fraction of ball lateral.
     private func aiSpeed() -> CGFloat {
-        min(Config.aiBaseSpeed * (1 + Config.aiSpeedPerLevel * CGFloat(level - 1)),
-            Config.aiMaxSpeed)
+        let t = difficultyT()
+        let raw = Config.lerp(Config.aiSpeedL1, Config.aiSpeedL10, t)
+        let frac = Config.lerp(Config.aiLateralFracL1, Config.aiLateralFracL10, t)
+        return min(raw, ballMaxLateralSpeed() * frac)
     }
 
     private func aiErrorAmp() -> CGFloat {
-        Config.aiErrorBase * pow(Config.aiErrorDecayPerLevel, CGFloat(level - 1))
+        Config.lerp(Config.aiErrorL1, Config.aiErrorL10, difficultyT())
+    }
+
+    private func aiReactionDelay() -> CGFloat {
+        Config.lerp(Config.aiReactionL1, Config.aiReactionL10, difficultyT())
+    }
+
+    private func aiIdleFactor() -> CGFloat {
+        Config.lerp(Config.aiIdleL1, Config.aiIdleL10, difficultyT())
+    }
+
+    private func englishStrength() -> CGFloat {
+        Config.lerp(Config.englishL1, Config.englishL10, difficultyT())
+    }
+
+    private func serveDragSpin() -> CGFloat {
+        Config.lerp(Config.serveDragL1, Config.serveDragL10, difficultyT())
+    }
+
+    /// World-space: does the player paddle cover the (parked) serve ball?
+    private func paddleOverlapsServeBall() -> Bool {
+        let slop = Config.paddleHitSlop
+        return abs(px - bx) <= Config.playerPaddleHalfW + Config.ballRadius + slop
+            && abs(py - by) <= Config.playerPaddleHalfH + Config.ballRadius + slop
     }
 
     // MARK: - Flow
@@ -340,6 +473,12 @@ final class GameScene: SKScene {
         opponentLives = Config.opponentLivesPerLevel
         px = 0; py = 0; ox = 0; oy = 0
         touchTarget = nil
+        nextServer = .player     // every round (incl. level 1): you serve first
+        awaitingPlayerServe = false
+        pointFreezeCountdown = 0
+        pointCalloutLabel.isHidden = true
+        serveHintLabel.isHidden = true
+        clearServeGesture()
 
         titleLayer.isHidden = true
         gameOverLayer.isHidden = true
@@ -355,55 +494,202 @@ final class GameScene: SKScene {
         scheduleServe()
     }
 
-    /// Every point starts here: ball parked mid-tunnel, short beat, then launch.
+    /// Park the ball for the next serve. Opponent auto-launches; you strike the ball.
     private func scheduleServe() {
         rallyHits = 0
         ballLive = false
-        serveCountdown = Config.serveDelay
-        bx = 0; by = 0
-        bz = Config.zFar * Config.serveZFraction
+        awaitingPlayerServe = false
+        serveCountdown = 0
         ballWasOutbound = false
         aiReactionClock = 0
+        aiErrX = 0; aiErrY = 0
+        // Every point: opponent starts centered (no crawl back from last rally).
+        ox = 0; oy = 0
         ballNode.isHidden = false
+        serveHintLabel.isHidden = true
+        clearServeGesture()
+
+        switch nextServer {
+        case .opponent:
+            // Mid/far tunnel, then auto-launch toward you.
+            bx = 0; by = 0
+            bz = Config.zFar * Config.serveZFraction
+            serveCountdown = Config.serveDelay
+        case .player:
+            // Fixed center of court — does NOT follow the paddle until struck.
+            bx = 0; by = 0
+            bz = Config.playerServeZ
+            awaitingPlayerServe = true
+            #if targetEnvironment(macCatalyst)
+            serveHintLabel.text = "MOVE PADDLE ONTO BALL · CLICK TO SERVE"
+            #else
+            serveHintLabel.text = "MOVE PADDLE ONTO BALL · SWIPE TO SERVE"
+            #endif
+            serveHintLabel.isHidden = false
+        }
         renderWorld()
     }
 
+    private func clearServeGesture() {
+        serveDragPrev = nil
+        serveDragDelta = .zero
+        serveTouchedBall = false
+    }
+
+    /// Screen-space test: is this point on (or near) the ball?
+    private func isOnBall(_ loc: CGPoint) -> Bool {
+        let p = proj.project(x: bx, y: by, z: bz)
+        let r = Config.ballRadius * proj.scale(z: bz) * Config.ballDrawScale
+            + Config.serveBallHitPad
+        let dx = loc.x - p.x, dy = loc.y - p.y
+        return dx * dx + dy * dy <= r * r
+    }
+
+    /// True if the segment from a→b enters the ball's screen circle.
+    private func segmentHitsBall(_ a: CGPoint, _ b: CGPoint) -> Bool {
+        if isOnBall(a) || isOnBall(b) { return true }
+        let c = proj.project(x: bx, y: by, z: bz)
+        let r = Config.ballRadius * proj.scale(z: bz) * Config.ballDrawScale
+            + Config.serveBallHitPad
+        let abx = b.x - a.x, aby = b.y - a.y
+        let acx = c.x - a.x, acy = c.y - a.y
+        let ab2 = abx * abx + aby * aby
+        guard ab2 > 0.001 else { return false }
+        var t = (acx * abx + acy * aby) / ab2
+        t = max(0, min(1, t))
+        let px = a.x + abx * t - c.x
+        let py = a.y + aby * t - c.y
+        return px * px + py * py <= r * r
+    }
+
+    /// Opponent auto-serve (toward you).
     private func launchBall() {
+        guard !ballLive, pointFreezeCountdown <= 0 else { return }
+        awaitingPlayerServe = false
+        serveHintLabel.isHidden = true
+        clearServeGesture()
         ballLive = true
         let speed = levelBallSpeed()
-        let a = CGFloat.random(in: -0.5...0.5)
-        let b = CGFloat.random(in: -0.35...0.35)
-        vx = speed * 0.30 * a
-        vy = speed * 0.22 * b
-        // Serve always toward the player, so they get first touch.
-        vz = -sqrt(max(speed * speed - vx * vx - vy * vy, 1))
+        let a = CGFloat.random(in: -0.45...0.45)
+        let b = CGFloat.random(in: -0.30...0.30)
+        vx = speed * 0.28 * a
+        vy = speed * 0.20 * b
+        let vzMag = sqrt(max(speed * speed - vx * vx - vy * vy, 1))
+        vz = -vzMag
+    }
+
+    /// Your serve: ball stays centered until struck by the *paddle* (any part).
+    /// English from contact offset (corners veer off that corner); drag adds spin.
+    private func launchPlayerServe(dragScreen: CGPoint) {
+        guard awaitingPlayerServe, !ballLive, pointFreezeCountdown <= 0 else { return }
+        guard paddleOverlapsServeBall() else { return }
+
+        awaitingPlayerServe = false
+        serveHintLabel.isHidden = true
+        clearServeGesture()
+
+        bx = 0; by = 0; bz = Config.playerServeZ
+        let speed = levelBallSpeed()
+
+        // Contact normal: ball at center relative to paddle — whole face works,
+        // not just the visual midpoint. Corners → both axes high → extra veer.
+        let nX = max(-1, min(1, (bx - px) / max(Config.playerPaddleHalfW, 1)))
+        let nY = max(-1, min(1, (by - py) / max(Config.playerPaddleHalfH, 1)))
+        let corner = abs(nX) * abs(nY)
+        let eng = englishStrength() * (1 + Config.serveCornerBoost * corner)
+
+        let dragMag = hypot(dragScreen.x, dragScreen.y)
+        var spinX: CGFloat = 0, spinY: CGFloat = 0
+        if dragMag > 3 {
+            let t = min(dragMag, 90) / 90
+            let spin = serveDragSpin()
+            spinX = (dragScreen.x / dragMag) * spin * t
+            spinY = (dragScreen.y / dragMag) * spin * t
+        }
+
+        vx = nX * eng * speed + spinX
+        vy = nY * eng * speed + spinY
+        vz = sqrt(max(speed * speed * 0.85, 1))
+        ballLive = true
+        applySpeed(speed)
+        Haptics.shared.paddleHit()
+        flashPaddle(playerPaddleNode)
+        pulseRing(atZ: bz)
+    }
+
+    /// Quick transparency dip on the paddle that just struck (visual hit feedback).
+    private func flashPaddle(_ node: SKNode) {
+        node.removeAction(forKey: "hitFlash")
+        node.alpha = 1
+        let down = SKAction.fadeAlpha(to: Config.paddleHitAlpha, duration: Config.paddleHitFlashDown)
+        let up = SKAction.fadeAlpha(to: 1.0, duration: Config.paddleHitFlashUp)
+        up.timingMode = .easeOut
+        node.run(SKAction.sequence([down, up]), withKey: "hitFlash")
+    }
+
+    /// Ball crossed a plane without a paddle — freeze on the plane, show feedback.
+    private func beginPointFreeze(playerScored: Bool, atX x: CGFloat, y: CGFloat, z: CGFloat) {
+        guard pointFreezeCountdown <= 0, phase == .playing else { return }
+        ballLive = false
+        bx = x; by = y; bz = z
+        vx = 0; vy = 0; vz = 0
+        pendingPointWin = playerScored
+        pointFreezeCountdown = Config.pointFreezeDuration
+        pointCalloutLabel.isHidden = false
+        if playerScored {
+            pointCalloutLabel.text = "POINT"
+            pointCalloutLabel.fontColor = Config.playerColor
+            Haptics.shared.pointScored()
+            flashNode.color = Config.playerColor
+        } else {
+            pointCalloutLabel.text = "MISS"
+            pointCalloutLabel.fontColor = Config.opponentColor
+            Haptics.shared.lifeLost()
+            flashNode.color = Config.opponentColor
+            playShake()
+        }
+        flashNode.run(flashAction, withKey: "flash")
+        pulseRing(atZ: z)
+        renderWorld()
+    }
+
+    private func resolvePointFreeze() {
+        pointCalloutLabel.isHidden = true
+        flashNode.color = .white
+        if pendingPointWin {
+            score += Config.scorePerOpponentLife * level
+            updateScoreHUD()
+            opponentLives -= 1
+            updateLivesHUD()
+            nextServer = .player   // you scored → you serve
+            if opponentLives <= 0 {
+                if level >= Config.maxLevel {
+                    winRun()
+                } else {
+                    levelUp()
+                }
+            } else {
+                scheduleServe()
+            }
+        } else {
+            playerLives -= 1
+            updateLivesHUD()
+            nextServer = .opponent // they scored → they serve
+            if playerLives <= 0 {
+                endRun(won: false)
+            } else {
+                scheduleServe()
+            }
+        }
     }
 
     private func playerMiss() {
-        Haptics.shared.lifeLost()
-        flashNode.run(flashAction, withKey: "flash")
-        playShake()
-        playerLives -= 1
-        updateLivesHUD()
-        if playerLives <= 0 {
-            endRun()
-        } else {
-            scheduleServe()
-        }
+        // Prefer beginPointFreeze; kept as safety if ball flies past without cross detect.
+        beginPointFreeze(playerScored: false, atX: bx, y: by, z: 0)
     }
 
     private func opponentMiss() {
-        Haptics.shared.pointScored()
-        score += Config.scorePerOpponentLife * level
-        updateScoreHUD()
-        opponentLives -= 1
-        updateLivesHUD()
-        pulseRing(atZ: Config.zFar)
-        if opponentLives <= 0 {
-            levelUp()
-        } else {
-            scheduleServe()
-        }
+        beginPointFreeze(playerScored: true, atX: bx, y: by, z: Config.zFar)
     }
 
     /// Reset position first so a replaced mid-shake action can't leave the court offset.
@@ -414,7 +700,7 @@ final class GameScene: SKScene {
     }
 
     private func levelUp() {
-        level += 1
+        level = min(level + 1, Config.maxLevel)
         opponentLives = Config.opponentLivesPerLevel
         if Config.extraLifeEveryNLevels > 0, level % Config.extraLifeEveryNLevels == 0 {
             playerLives += 1
@@ -423,7 +709,7 @@ final class GameScene: SKScene {
         updateLivesHUD()
         Haptics.shared.levelUp()
         flashNode.run(flashAction, withKey: "flash")
-        transitionLabel.text = "LEVEL \(level)"
+        transitionLabel.text = "LEVEL \(level)/\(Config.maxLevel)"
         transitionLabel.isHidden = false
         ballNode.isHidden = true
         transitionCountdown = Config.levelTransitionDuration
@@ -433,13 +719,22 @@ final class GameScene: SKScene {
     private func endTransition() {
         transitionLabel.isHidden = true
         phase = .playing
+        nextServer = .player     // new level/round: you serve first
+        ballNode.isHidden = false
         scheduleServe()
     }
 
-    private func endRun() {
+    private func winRun() {
+        Haptics.shared.levelUp()
+        endRun(won: true)
+    }
+
+    private func endRun(won: Bool) {
         // Capture before saveHighScoreIfNeeded overwrites highScore.
         let isNewHigh = score > highScore && score > 0
         saveHighScoreIfNeeded()
+        goTitleLabel.text = won ? "YOU WIN" : "GAME OVER"
+        goTitleLabel.fontColor = won ? Config.playerColor : .white
         goScoreLabel.text = "SCORE \(score)"
         goHighLabel.text = isNewHigh
             ? "NEW HIGH SCORE" : "HIGH SCORE \(highScore)"
@@ -447,6 +742,8 @@ final class GameScene: SKScene {
         ballNode.isHidden = true
         playerPaddleNode.isHidden = true
         oppPaddleNode.isHidden = true
+        serveHintLabel.isHidden = true
+        pointCalloutLabel.isHidden = true
         phase = .gameOver
         lastPhaseChange = CACurrentMediaTime()
     }
@@ -477,7 +774,7 @@ final class GameScene: SKScene {
     // MARK: - HUD updates (event-driven; nothing here runs per frame)
 
     private func updateScoreHUD() { hudScoreLabel.text = "\(score)" }
-    private func updateLevelHUD() { hudLevelLabel.text = "LV \(level)" }
+    private func updateLevelHUD() { hudLevelLabel.text = "LV \(level)/\(Config.maxLevel)" }
     private func updateLivesHUD() {
         hudPlayerLives.text = String(repeating: "◆", count: max(playerLives, 0))
         hudOppLives.text = String(repeating: "◆", count: max(opponentLives, 0))
@@ -497,8 +794,17 @@ final class GameScene: SKScene {
         switch phase {
         case .playing:
             stepPlayer(dt)
-            stepBall(dt)
-            stepAI(dt)
+            if pointFreezeCountdown > 0 {
+                pointFreezeCountdown -= dt
+                if pointFreezeCountdown <= 0 { resolvePointFreeze() }
+            } else {
+                stepBall(dt)
+                stepAI(dt)
+            }
+            // Serve ball stays fixed at court center until struck (not glued to paddle).
+            if awaitingPlayerServe {
+                bx = 0; by = 0; bz = Config.playerServeZ
+            }
             renderWorld()
         case .levelTransition:
             stepPlayer(dt)
@@ -514,10 +820,10 @@ final class GameScene: SKScene {
 
     private func stepPlayer(_ dt: CGFloat) {
         guard let target = touchTarget else { return }
-        // Exponential smoothing, frame-rate independent: responsive but not twitchy.
-        let k = 1 - exp(-Config.paddleSmoothing * dt)
-        px += (target.x - px) * k
-        py += (target.y - py) * k
+        // Full capability from frame 1: paddle is the pointer (no lag).
+        _ = dt
+        px = target.x
+        py = target.y
         clampPlayer()
     }
 
@@ -536,6 +842,10 @@ final class GameScene: SKScene {
         let offset: CGFloat = thumbOffset ? Config.touchOffsetY : 0
         let wy = loc.y - proj.center.y + offset
         touchTarget = CGPoint(x: wx, y: wy)
+        // Apply immediately so click frames don't fight hover.
+        px = wx
+        py = wy
+        clampPlayer()
     }
 
     /// Mac Catalyst: paddle follows the mouse with no click held.
@@ -548,8 +858,11 @@ final class GameScene: SKScene {
 
     private func stepBall(_ dt: CGFloat) {
         if !ballLive {
-            serveCountdown -= dt
-            if serveCountdown <= 0 { launchBall() }
+            // Opponent auto-serve only (player serve waits for click/tap).
+            if !awaitingPlayerServe && serveCountdown > 0 {
+                serveCountdown -= dt
+                if serveCountdown <= 0 { launchBall() }
+            }
             return
         }
 
@@ -568,20 +881,20 @@ final class GameScene: SKScene {
         else if by < -effH { by = -2 * effH - by; vy = -vy; wallBounce() }
 
         // --- Paddle collisions, sampled by z-crossing ---------------------
-        // We never test rendered screen overlap. Instead: did the ball's z
-        // pass a paddle plane between the previous frame and this one? If so,
-        // solve for the exact fraction t of the frame where it crossed,
-        // reconstruct (x, y) at that instant, and test against the paddle
-        // rect (inflated by the ball radius). Because the check is on the
-        // crossing itself, the ball cannot tunnel through a paddle no matter
-        // how fast it moves.
+        // World-space rect + ball radius + slop (glow made the paddle look
+        // bigger than the old hitbox; slop + larger paddle close that gap).
+
+        let pSlop = Config.paddleHitSlop
+        let pHitW = Config.playerPaddleHalfW + Config.ballRadius + pSlop
+        let pHitH = Config.playerPaddleHalfH + Config.ballRadius + pSlop
+        let oHitW = Config.oppPaddleHalfW + Config.ballRadius + pSlop
+        let oHitH = Config.oppPaddleHalfH + Config.ballRadius + pSlop
 
         if prevZ > 0 && bz <= 0 && vz < 0 {
             let t = prevZ / (prevZ - bz)
             let xc = prevX + (bx - prevX) * t
             let yc = prevY + (by - prevY) * t
-            if abs(xc - px) <= Config.playerPaddleHalfW + Config.ballRadius,
-               abs(yc - py) <= Config.playerPaddleHalfH + Config.ballRadius {
+            if abs(xc - px) <= pHitW, abs(yc - py) <= pHitH {
                 hitPaddle(xc: xc, yc: yc, cx: px, cy: py,
                           paddleHalfW: Config.playerPaddleHalfW,
                           paddleHalfH: Config.playerPaddleHalfH,
@@ -590,33 +903,34 @@ final class GameScene: SKScene {
                 score += Config.scorePerHit * level
                 updateScoreHUD()
                 Haptics.shared.paddleHit()
+            } else {
+                // Miss: stop on the plane — no fly-through past the camera.
+                beginPointFreeze(playerScored: false, atX: xc, y: yc, z: 0)
+                return
             }
-            // On a miss the ball keeps flying toward the camera; the life is
-            // lost only once it's clearly past the plane (below), which reads
-            // as the ball whooshing by.
         }
 
         if prevZ < Config.zFar && bz >= Config.zFar && vz > 0 {
             let t = (Config.zFar - prevZ) / (bz - prevZ)
             let xc = prevX + (bx - prevX) * t
             let yc = prevY + (by - prevY) * t
-            if abs(xc - ox) <= Config.oppPaddleHalfW + Config.ballRadius,
-               abs(yc - oy) <= Config.oppPaddleHalfH + Config.ballRadius {
+            if abs(xc - ox) <= oHitW, abs(yc - oy) <= oHitH {
                 hitPaddle(xc: xc, yc: yc, cx: ox, cy: oy,
                           paddleHalfW: Config.oppPaddleHalfW,
                           paddleHalfH: Config.oppPaddleHalfH,
                           newZ: Config.zFar - 0.1, outbound: false)
                 Haptics.shared.paddleHit()
+            } else {
+                beginPointFreeze(playerScored: true, atX: xc, y: yc, z: Config.zFar)
+                return
             }
         }
 
-        // Misses register once the ball is clearly past a plane.
-        if bz < -Config.missDepthNear {
-            ballLive = false
-            playerMiss()
-        } else if bz > Config.zFar + Config.missDepthFar {
-            ballLive = false
-            opponentMiss()
+        // Safety net if a frame skips the plane entirely.
+        if bz < -40 {
+            beginPointFreeze(playerScored: false, atX: bx, y: by, z: 0)
+        } else if bz > Config.zFar + 40 {
+            beginPointFreeze(playerScored: true, atX: bx, y: by, z: Config.zFar)
         }
     }
 
@@ -624,14 +938,18 @@ final class GameScene: SKScene {
                            paddleHalfW: CGFloat, paddleHalfH: CGFloat,
                            newZ: CGFloat, outbound: Bool) {
         let speed = sqrt(vx * vx + vy * vy + vz * vz)
-        // English: an off-center hit tilts the return proportionally.
+        // English: off-center / corner hit; strength ramps mildly with level.
         let nX = max(-1, min(1, (xc - cx) / paddleHalfW))
         let nY = max(-1, min(1, (yc - cy) / paddleHalfH))
-        vx += nX * Config.englishMultiplier * speed
-        vy += nY * Config.englishMultiplier * speed
+        let corner = abs(nX) * abs(nY)
+        let eng = englishStrength() * (1 + Config.serveCornerBoost * corner * 0.5)
+        vx += nX * eng * speed
+        vy += nY * eng * speed
         vz = outbound ? abs(vz) : -abs(vz)
         bx = xc; by = yc; bz = newZ
         applySpeed(targetSpeed())
+        // Outbound = you struck (near plane); inbound return = opponent struck.
+        flashPaddle(outbound ? playerPaddleNode : oppPaddleNode)
         pulseRing(atZ: newZ)
     }
 
@@ -653,7 +971,14 @@ final class GameScene: SKScene {
     // MARK: - Opponent AI
 
     private func stepAI(_ dt: CGFloat) {
-        let outbound = ballLive && vz > 0
+        // Between points / before serve: stay parked center (scheduleServe snaps too).
+        if !ballLive {
+            ox = 0; oy = 0
+            ballWasOutbound = false
+            return
+        }
+
+        let outbound = vz > 0
 
         // The moment the ball turns outbound, roll a fresh aim error and
         // restart the reaction clock. The error shrinks with level; the
@@ -668,11 +993,11 @@ final class GameScene: SKScene {
 
         var tx: CGFloat = 0
         var ty: CGFloat = 0
-        var speedFactor: CGFloat = Config.aiIdleSpeedFactor  // slow recentre when idle
+        var speedFactor: CGFloat = aiIdleFactor()  // slow recentre when idle
 
         if outbound {
             aiReactionClock += dt
-            if aiReactionClock >= Config.aiReactionDelay {
+            if aiReactionClock >= aiReactionDelay() {
                 // Project the ball to the far plane, folding wall bounces in,
                 // then aim at that intercept plus this approach's error.
                 let tHit = (Config.zFar - bz) / vz
@@ -703,11 +1028,18 @@ final class GameScene: SKScene {
     private func renderWorld() {
         playerPaddleNode.position = proj.project(x: px, y: py, z: 0)
         oppPaddleNode.position = proj.project(x: ox, y: oy, z: Config.zFar)
+        // Far paddle must scale with perspective or it looks huge / dishonest.
+        oppPaddleNode.setScale(proj.scale(z: Config.zFar))
         ballNode.position = proj.project(x: bx, y: by, z: bz)
-        ballNode.setScale(proj.scale(z: bz))
+        // Perspective scale + slight draw boost so near/far size delta is readable.
+        ballNode.setScale(proj.scale(z: bz) * Config.ballDrawScale)
     }
 
     // MARK: - Touch handling
+    //
+    // Serve: ball is fixed center. Position paddle over it (any part of the
+    // face counts). Mac: click to strike (hover aims — click does NOT jump
+    // the paddle). iOS: finger aims; swipe while overlapping = spin serve.
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
@@ -729,19 +1061,66 @@ final class GameScene: SKScene {
                 pauseGame()
                 return
             }
+            if awaitingPlayerServe {
+                serveDragPrev = loc
+                serveDragDelta = .zero
+                serveTouchedBall = isOnBall(loc) || paddleOverlapsServeBall()
+                #if targetEnvironment(macCatalyst)
+                // Do not setTouchTarget — that was jumping the paddle to the click.
+                #else
+                setTouchTarget(loc)
+                #endif
+                return
+            }
+            #if targetEnvironment(macCatalyst)
+            // Hover owns aim on Mac; clicks are for serve / UI only.
+            #else
             setTouchTarget(loc)
+            #endif
         case .levelTransition:
+            #if !targetEnvironment(macCatalyst)
             setTouchTarget(loc)
+            #endif
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard phase == .playing || phase == .levelTransition,
               let touch = touches.first else { return }
-        setTouchTarget(touch.location(in: self))
+        let loc = touch.location(in: self)
+
+        if phase == .playing, awaitingPlayerServe {
+            if let prev = serveDragPrev {
+                serveDragDelta = CGPoint(x: loc.x - prev.x, y: loc.y - prev.y)
+                if segmentHitsBall(prev, loc) || paddleOverlapsServeBall() {
+                    serveTouchedBall = true
+                }
+            }
+            serveDragPrev = loc
+            #if !targetEnvironment(macCatalyst)
+            setTouchTarget(loc)
+            // Phone: swipe while paddle covers ball → serve with spin.
+            if paddleOverlapsServeBall(), hypot(serveDragDelta.x, serveDragDelta.y) > 8 {
+                launchPlayerServe(dragScreen: serveDragDelta)
+            }
+            #endif
+            return
+        }
+
+        #if !targetEnvironment(macCatalyst)
+        setTouchTarget(loc)
+        #endif
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if phase == .playing, awaitingPlayerServe {
+            // Strike if paddle covers the ball (any face region), or click was on ball
+            // while already overlapping from hover/finger.
+            if paddleOverlapsServeBall() {
+                launchPlayerServe(dragScreen: serveDragDelta)
+            }
+        }
+        clearServeGesture()
         #if targetEnvironment(macCatalyst)
         // Keep last aim; hover continues tracking without a click.
         #else
@@ -750,6 +1129,7 @@ final class GameScene: SKScene {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        clearServeGesture()
         #if targetEnvironment(macCatalyst)
         #else
         touchTarget = nil

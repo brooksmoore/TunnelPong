@@ -1,8 +1,11 @@
-# Tunnel Pong (iOS, v1)
+# CyberPong (iOS, v1 — wrapped)
 
-2.5D tunnel Pong: look down a wireframe hallway, drag your paddle with a finger,
+2.5D retrowave tunnel Pong: look down a neon wireframe hallway, drag your paddle,
 volley against an AI at the far end. Pure SpriteKit, zero assets, zero
-dependencies. iOS 17+, iPhone only, portrait locked.
+dependencies. iOS 17+, iPhone (+ Mac Catalyst desktop play), portrait locked.
+
+**v1 is feature-complete for solo play.** Pause before v2 multiplayer until the
+STATUS gate is green (device feel, Config freeze, cold second-person test).
 
 **Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **v2 blueprint:** [docs/V2_DESIGN.md](docs/V2_DESIGN.md) · **Now:** [STATUS.md](STATUS.md) · **History:** [LEDGER.md](LEDGER.md)
 
@@ -50,18 +53,18 @@ A legacy `/Applications/Xcode.app` Simulator (v13.x) can crash on modern macOS
 
 ## If the difficulty feels wrong, tune these first (`Config.swift`)
 
-1. **`aiErrorBase`** (46) — strongest dial; raise = easier opponent.
-2. **`ballBaseSpeed`** (620) — lower toward 520 if too hard.
-3. **`aiBaseSpeed`** (240) — lower if AI reaches corners too well.
+Campaign is **10 levels**, linear L1→L10. Each ramping variable has an `*L1` and `*L10` pair — edit those endpoints, not ad-hoc multipliers.
 
-Also: `paddleSmoothing`, `touchOffsetY`, `englishMultiplier`.
+1. **`aiErrorL1` / `aiErrorL10`** — aim noise (higher = easier).
+2. **`ballSpeedL1` / `ballSpeedL10`** — ball speed.
+3. **`aiLateralFracL1` / `aiLateralFracL10`** — AI XY as a fraction of ball lateral max (L10 ≈ 0.94, never 1.0).
 
-When Config stops changing every session, mark that on the v2 gate in `STATUS.md`.
+Player paddle does **not** ramp. When dials stop moving every session, mark that on the v2 gate in `STATUS.md`.
 
 ## Rules (solo v1)
 
-- You: 3 lives for the run. Opponent: 3 per level.
-- Clear opponent lives → level up; ball +12%/level, AI +16%/level, error ×0.80/level.
+- You: 3 lives for the run. Opponent: 3 per level. **10 levels** total; clear L10 → win.
+- Difficulty is linear from L1 (calibrated easy) to L10 (near-max AI + physics).
 - Score: 10 × level per hit, 100 × level per opponent life. High score in `UserDefaults`.
 
 ## Tests
