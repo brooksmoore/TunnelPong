@@ -143,27 +143,56 @@ struct Config {
     /// Mac Catalyst titlebar eats the top of the content view; treat as min top inset.
     static let macTitlebarInset: CGFloat = 40
 
-    // MARK: - Type (cyberpunk / condensed geometric)
-    /// System fonts that read synthwave without bundling assets.
-    static let fontTitle = "AvenirNextCondensed-Bold"
-    static let fontBody  = "AvenirNext-DemiBold"
-    static let fontHUD   = "AvenirNextCondensed-Medium"
+    // MARK: - Type (thin, geometric, wide-tracked)
+    // Sleek and symmetrical — the letterforms should feel drawn with a single
+    // hairline. Tracking (see *Tracking below) does most of the work.
+    static let fontTitle = "AvenirNext-UltraLight"
+    static let fontBody  = "Avenir-Light"
+    static let fontHUD   = "Avenir-Light"
+    /// Extra letter-spacing, in points, applied via attributed text.
+    static let titleTracking: CGFloat = 14
+    static let hudTracking: CGFloat = 3.2
 
-    // MARK: - Retrowave palette (c1/c2/c3: magenta grid, cyan neon, sunset ball)
-    // Screen stays majority black; neon only on entities + tunnel wireframe.
-    /// You — electric cyan (c2 neon buildings).
-    static let playerColor   = SKColor(red: 0.00, green: 0.95, blue: 1.00, alpha: 1)
-    /// AI — hot magenta / purple (c1 grid / c3 peaks).
-    static let opponentColor = SKColor(red: 1.00, green: 0.20, blue: 0.75, alpha: 1)
-    /// Ball — sunset orange→gold (c1/c2 sun).
-    static let ballColor     = SKColor(red: 1.00, green: 0.55, blue: 0.12, alpha: 1)
-    static let ballStrokeColor = SKColor(red: 1.00, green: 0.28, blue: 0.35, alpha: 1)
-    /// Tunnel walls — dim violet wire (mountains/grid, not paddle cyan).
-    static let ringColor     = SKColor(red: 0.55, green: 0.35, blue: 0.95, alpha: 1)
-    /// HUD text — soft pink-white.
-    static let hudColor      = SKColor(red: 0.95, green: 0.80, blue: 0.95, alpha: 1)
-    /// Title accent (second word / glow).
-    static let titleAccent   = SKColor(red: 1.00, green: 0.35, blue: 0.70, alpha: 1)
+    // MARK: - Retrowave palette
+    //
+    // Reference: black sky falling through indigo → violet → magenta to a hot
+    // pink horizon, near-black silhouettes, one white moon. Screen stays
+    // majority black. Only THREE things carry color, so the eye never hunts:
+    //   you = white · opponent = magenta · ball = neon orange.
+
+    /// You — moon white, faintly lavender. Always the brightest thing near you.
+    static let playerColor   = SKColor(red: 0.94, green: 0.92, blue: 1.00, alpha: 1)
+    /// AI — hot magenta, sitting far down the tunnel against deep violet.
+    static let opponentColor = SKColor(red: 1.00, green: 0.18, blue: 0.49, alpha: 1)
+    /// Ball — neon orange. The one warm object in a cool frame.
+    static let ballColor     = SKColor(red: 1.00, green: 0.48, blue: 0.09, alpha: 1)
+    static let ballStrokeColor = SKColor(red: 1.00, green: 0.72, blue: 0.24, alpha: 1)
+    static let ballCoreColor = SKColor(red: 1.00, green: 0.88, blue: 0.62, alpha: 1)
+    /// Tunnel wire — violet, dim, never competing with the three actors.
+    static let ringColor     = SKColor(red: 0.62, green: 0.36, blue: 0.98, alpha: 1)
+    /// HUD text — soft lavender white.
+    static let hudColor      = SKColor(red: 0.86, green: 0.80, blue: 0.96, alpha: 1)
+    /// Title accent / hot pink horizon line.
+    static let titleAccent   = SKColor(red: 1.00, green: 0.36, blue: 0.55, alpha: 1)
+
+    // MARK: - Sky (vertical gradient, black at top → hot pink at the horizon)
+    static let skyTop     = SKColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)
+    static let skyHigh    = SKColor(red: 0.07, green: 0.03, blue: 0.17, alpha: 1)
+    static let skyMid     = SKColor(red: 0.23, green: 0.11, blue: 0.42, alpha: 1)
+    static let skyLow     = SKColor(red: 0.56, green: 0.18, blue: 0.62, alpha: 1)
+    static let skyGlow    = SKColor(red: 0.91, green: 0.26, blue: 0.50, alpha: 1)
+    static let skyHot     = SKColor(red: 1.00, green: 0.40, blue: 0.49, alpha: 1)
+    /// Where the horizon sits, as a fraction of screen height from the bottom.
+    static let horizonFrac: CGFloat = 0.085
+    /// Silhouette peaks — effectively black, like the reference.
+    static let mountainColor = SKColor(red: 0.02, green: 0.01, blue: 0.04, alpha: 1)
+    /// Tallest peak height as a fraction of screen height.
+    static let mountainHeightFrac: CGFloat = 0.20
+    static let moonColor = SKColor.white
+    static let moonRadius: CGFloat = 13
+    /// Thin tapering diagonals (the reference's speed streaks).
+    static let streakColor = SKColor(red: 1.00, green: 0.24, blue: 0.43, alpha: 1)
+    static let streakAlpha: CGFloat = 0.30
 
     // MARK: - Impact flash
     /// Paddle alpha dips to this on strike, then recovers.

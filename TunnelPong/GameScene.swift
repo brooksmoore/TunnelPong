@@ -71,6 +71,8 @@ final class GameScene: SKScene {
 
     // MARK: - Nodes
 
+    private let backdropNode = SKNode()
+    private var backdropSize: CGSize = .zero
     private let worldNode = SKNode()
     private var rings: [SKShapeNode] = []
     private var cornerLines: [SKShapeNode] = []
@@ -81,23 +83,23 @@ final class GameScene: SKScene {
     private var oppPaddleNode: SKShapeNode!
 
     private var hudNode: SKNode!
-    private var hudLevelLabel: SKLabelNode!
-    private var hudScoreLabel: SKLabelNode!
-    private var hudPlayerLives: SKLabelNode!
-    private var hudOppLives: SKLabelNode!
-    private var pauseButton: SKLabelNode!
-    private var serveHintLabel: SKLabelNode!
-    private var pointCalloutLabel: SKLabelNode!
+    private var hudLevelLabel: NeonLabel!
+    private var hudScoreLabel: NeonLabel!
+    private var hudPlayerLives: NeonLabel!
+    private var hudOppLives: NeonLabel!
+    private var pauseButton: NeonLabel!
+    private var serveHintLabel: NeonLabel!
+    private var pointCalloutLabel: NeonLabel!
 
     private var titleLayer: SKNode!
-    private var titleHighLabel: SKLabelNode!
+    private var titleHighLabel: NeonLabel!
     private var pauseLayer: SKNode!
-    private var quitLabel: SKLabelNode!
+    private var quitLabel: NeonLabel!
     private var gameOverLayer: SKNode!
-    private var goTitleLabel: SKLabelNode!
-    private var goScoreLabel: SKLabelNode!
-    private var goHighLabel: SKLabelNode!
-    private var transitionLabel: SKLabelNode!
+    private var goTitleLabel: NeonLabel!
+    private var goScoreLabel: NeonLabel!
+    private var goHighLabel: NeonLabel!
+    private var transitionLabel: NeonLabel!
     private var flashNode: SKSpriteNode!
 
     private var shakeAction: SKAction!
@@ -111,6 +113,8 @@ final class GameScene: SKScene {
         halfW = size.width / 2 * Config.courtWidthFactor
         halfH = size.height / 2 * Config.courtHeightFactor
 
+        backdropNode.zPosition = -100
+        addChild(backdropNode)
         addChild(worldNode)
         buildTunnel()
         buildActors()
@@ -145,6 +149,7 @@ final class GameScene: SKScene {
         // halfW/halfH ARE the ball's walls, so the drawn tunnel has to be
         // rebuilt from them — repositioning alone would leave the wireframe
         // describing the old court after a Mac window resize.
+        rebuildBackdrop()
         rebuildTunnelGeometry()
         layoutHUD()
         layoutOverlays()
@@ -157,6 +162,35 @@ final class GameScene: SKScene {
             pauseDim.size = CGSize(width: size.width * 1.2, height: size.height * 1.2)
         }
         renderWorld()
+    }
+
+    /// Sunset sky, silhouette peaks, crescent, and light streaks. Rebuilt only
+    /// when the frame actually changes size — the sky is a rendered texture.
+    private func rebuildBackdrop() {
+        guard size.width > 0, size.height > 0, size != backdropSize else { return }
+        backdropSize = size
+        backdropNode.removeAllChildren()
+
+        let sky = SKSpriteNode(texture: NodeFactory.skyTexture(size: size))
+        sky.size = size
+        sky.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        sky.zPosition = 0
+        backdropNode.addChild(sky)
+
+        let streaks = NodeFactory.streaks(size: size)
+        streaks.zPosition = 1
+        backdropNode.addChild(streaks)
+
+        let moon = SKSpriteNode(texture: NodeFactory.moonTexture(radius: Config.moonRadius))
+        moon.position = CGPoint(x: size.width * 0.78, y: size.height * 0.83)
+        moon.zPosition = 2
+        backdropNode.addChild(moon)
+
+        // Peaks sit in front of the sky but behind the tunnel, so the wireframe
+        // reads as passing over the landscape.
+        let peaks = NodeFactory.mountains(size: size)
+        peaks.zPosition = 3
+        backdropNode.addChild(peaks)
     }
 
     /// Re-derive every ring path and corner rail from the current court size.
@@ -407,7 +441,7 @@ final class GameScene: SKScene {
         addChild(transitionLabel)
     }
 
-    private func place(_ node: SKLabelNode, _ x: CGFloat, _ y: CGFloat) -> SKLabelNode {
+    private func place(_ node: NeonLabel, _ x: CGFloat, _ y: CGFloat) -> NeonLabel {
         node.position = CGPoint(x: x, y: y)
         return node
     }
@@ -486,7 +520,7 @@ final class GameScene: SKScene {
     private func showTitle() {
         phase = .title
         lastPhaseChange = CACurrentMediaTime()
-        titleHighLabel.text = "HIGH SCORE \(highScore)"
+        titleHighLabel.display("HIGH SCORE \(highScore)")
         titleLayer.isHidden = false
         gameOverLayer.isHidden = true
         pauseLayer.isHidden = true
@@ -552,9 +586,9 @@ final class GameScene: SKScene {
             bz = Config.playerServeZ
             awaitingPlayerServe = true
             #if targetEnvironment(macCatalyst)
-            serveHintLabel.text = "MOVE PADDLE ONTO BALL · CLICK TO SERVE"
+            serveHintLabel.display("MOVE PADDLE ONTO BALL · CLICK TO SERVE")
             #else
-            serveHintLabel.text = "MOVE PADDLE ONTO BALL · SWIPE TO SERVE"
+            serveHintLabel.display("MOVE PADDLE ONTO BALL · SWIPE TO SERVE")
             #endif
             serveHintLabel.isHidden = false
         }
@@ -641,13 +675,13 @@ final class GameScene: SKScene {
         pointFreezeCountdown = Config.pointFreezeDuration
         pointCalloutLabel.isHidden = false
         if playerScored {
-            pointCalloutLabel.text = "POINT"
-            pointCalloutLabel.fontColor = Config.playerColor
+            pointCalloutLabel.display("POINT")
+            pointCalloutLabel.tint = Config.playerColor
             Haptics.shared.pointScored()
             flashNode.color = Config.playerColor
         } else {
-            pointCalloutLabel.text = "MISS"
-            pointCalloutLabel.fontColor = Config.opponentColor
+            pointCalloutLabel.display("MISS")
+            pointCalloutLabel.tint = Config.opponentColor
             Haptics.shared.lifeLost()
             flashNode.color = Config.opponentColor
             playShake()
@@ -704,7 +738,7 @@ final class GameScene: SKScene {
         updateLivesHUD()
         Haptics.shared.levelUp()
         flashNode.run(flashAction, withKey: "flash")
-        transitionLabel.text = "LEVEL \(level)"
+        transitionLabel.display("LEVEL \(level)")
         transitionLabel.isHidden = false
         ballNode.isHidden = true
         transitionCountdown = Config.levelTransitionDuration
@@ -723,11 +757,10 @@ final class GameScene: SKScene {
         // Capture before saveHighScoreIfNeeded overwrites highScore.
         let isNewHigh = score > highScore && score > 0
         saveHighScoreIfNeeded()
-        goTitleLabel.text = "GAME OVER"
-        goTitleLabel.fontColor = .white
-        goScoreLabel.text = "SCORE \(score)"
-        goHighLabel.text = isNewHigh
-            ? "NEW HIGH SCORE" : "HIGH SCORE \(highScore)"
+        goTitleLabel.display("GAME OVER")
+        goTitleLabel.tint = .white
+        goScoreLabel.display("SCORE \(score)")
+        goHighLabel.display(isNewHigh ? "NEW HIGH SCORE" : "HIGH SCORE \(highScore)")
         gameOverLayer.isHidden = false
         ballNode.isHidden = true
         playerPaddleNode.isHidden = true
@@ -763,19 +796,19 @@ final class GameScene: SKScene {
 
     // MARK: - HUD updates (event-driven; nothing here runs per frame)
 
-    private func updateScoreHUD() { hudScoreLabel.text = "\(score)" }
-    private func updateLevelHUD() { hudLevelLabel.text = "LV \(level)" }
+    private func updateScoreHUD() { hudScoreLabel.display("\(score)") }
+    private func updateLevelHUD() { hudLevelLabel.display("LV \(level)") }
     private func updateLivesHUD() {
         // Spares are hearts. At zero spares an empty label would look broken,
         // so name the state instead — this is the one-more-miss warning.
         if playerLives <= 0 {
-            hudPlayerLives.text = "LAST LIFE"
-            hudPlayerLives.fontColor = Config.opponentColor
+            hudPlayerLives.display("LAST LIFE")
+            hudPlayerLives.tint = Config.opponentColor
         } else {
-            hudPlayerLives.text = String(repeating: "◆", count: playerLives)
-            hudPlayerLives.fontColor = Config.playerColor
+            hudPlayerLives.display(String(repeating: "◆", count: playerLives))
+            hudPlayerLives.tint = Config.playerColor
         }
-        hudOppLives.text = String(repeating: "◆", count: max(opponentLives, 0))
+        hudOppLives.display(String(repeating: "◆", count: max(opponentLives, 0)))
     }
 
     // MARK: - Update loop
