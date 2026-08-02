@@ -782,3 +782,51 @@ Missing keys raise `NSException` → `EXC_BAD_ACCESS` on main thread (not Swift-
 `UIWindowScene.sizeRestrictions` (safe). App stays up (verified pid after launch).
 
 ---
+
+## 2026-08-02 — Claude: App Store groundwork (privacy manifest + StoreKit 2)
+
+**Actor:** Claude (Opus 5). Brooks decided: **no ads in v1** — free app with a
+single $0.99 non-consumable "Supporter" purchase. Keeps the zero-dependency
+property, skips App Tracking Transparency, and keeps privacy labels near-empty.
+
+### Added
+
+| File | Purpose |
+|------|---------|
+| `TunnelPong/PrivacyInfo.xcprivacy` | Required for submission. Declares no tracking, no collected data, and the one required-reason API in use: `UserDefaults` (`CA92.1`) for the high score. |
+| `TunnelPong/Store.swift` | StoreKit 2 wrapper — native, no third-party SDK. Product load, purchase, restore, entitlement refresh, and a `Transaction.updates` listener for Ask-to-Buy / cross-device / refund events. |
+| `TunnelPong/Products.storekit` | Local StoreKit config so purchases can be tested **before** paying Apple $99. Referenced by the scheme; deliberately **not** in the Resources build phase. |
+
+### Design notes
+
+- Ownership truth is always `Transaction.currentEntitlements` (Apple-verified).
+  The UserDefaults copy is only a launch/offline **cache** for rendering, never
+  the grant itself.
+- `AppStore.sync()` restore is wired to an explicit RESTORE control — App Review
+  rejects non-consumables without one, and sync must be user-initiated.
+- The store row hides itself when no product loads (offline, or before the
+  product exists in App Store Connect) rather than showing a dead button.
+- Title-screen taps: the store controls are claimed **before** the
+  "tap anywhere to start" handler, or they'd be unreachable.
+
+### Fixed along the way
+
+- **Title layout was index-based** (`kids[0..3]`), so adding any node silently
+  shifted everything after it. Replaced with named references.
+- **`Products.storekit` was shipping inside the .app** after I first added it to
+  Resources. Removed from the build phase; verified absent from the bundle and
+  that `PrivacyInfo.xcprivacy` *is* present.
+
+### Still between here and the App Store
+
+1. **$99/yr Apple Developer Program** (currently free personal-team signing).
+2. **Paid Apps Agreement** — banking + tax forms. Usually the slowest step.
+3. Privacy policy URL (GitHub Pages off the now-public repo would do).
+4. App Store Connect record: screenshots, description, keywords, age rating.
+5. **iPad decision** — `TARGETED_DEVICE_FAMILY = "1,2"` claims iPad support, so
+   Apple will review on iPad and want iPad screenshots. **Note:** dropping to
+   iPhone-only would break Mac Catalyst, which is derived from the iPad idiom.
+6. Decide what, if anything, the Supporter purchase unlocks beyond the title
+   mark (a pure tip jar is allowed under 3.1.1, but should be framed as one).
+
+---

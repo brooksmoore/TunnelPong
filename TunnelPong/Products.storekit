@@ -1,0 +1,31 @@
+{
+  "identifier" : "CyberPongStoreKitConfig",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "CP0001",
+      "localizations" : [
+        {
+          "description" : "Say thanks and unlock the supporter mark on the title screen.",
+          "displayName" : "Supporter",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.brooksmoore.tunnelpong.supporter",
+      "referenceName" : "Supporter",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "CyberPong",
+    "_developerTeamID" : "",
+    "_lastSynchronizedDate" : 0
+  },
+  "subscriptionGroups" : [],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

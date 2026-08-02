@@ -120,6 +120,11 @@ final class GameScene: SKScene {
 
     private var titleLayer: SKNode!
     private var titleHighLabel: PixelLabel!
+    private var titleWordTop: PixelLabel!
+    private var titleWordBottom: PixelLabel!
+    private var titleTapLabel: PixelLabel!
+    private var titleStoreLabel: PixelLabel!
+    private var titleRestoreLabel: PixelLabel!
     private var pauseLayer: SKNode!
     private var quitLabel: PixelLabel!
     private var gameOverLayer: SKNode!
@@ -150,6 +155,8 @@ final class GameScene: SKScene {
 
         Haptics.shared.prepare()
         Audio.shared.prepare()
+        Store.shared.onChange = { [weak self] in self?.refreshStoreRow() }
+        Store.shared.start()
         NotificationCenter.default.addObserver(
             self, selector: #selector(appWillResign),
             name: UIApplication.willResignActiveNotification, object: nil)
@@ -485,13 +492,14 @@ final class GameScene: SKScene {
         let cyberY = min(cy + 130, maxTop)
         let pongY = cyberY - 62
         // Order matches buildOverlays: CYBER, PONG, tap prompt, high score.
-        let kids = titleLayer.children
-        if kids.count >= 4 {
-            kids[0].position = CGPoint(x: cx, y: cyberY)
-            kids[1].position = CGPoint(x: cx, y: pongY)
-            kids[2].position = CGPoint(x: cx, y: cy - 50)
-            kids[3].position = CGPoint(x: cx, y: cy - 110)
-        }
+        // Named refs, not child indices — adding a node used to silently shift
+        // everything that came after it.
+        titleWordTop?.position = CGPoint(x: cx, y: cyberY)
+        titleWordBottom?.position = CGPoint(x: cx, y: pongY)
+        titleTapLabel?.position = CGPoint(x: cx, y: cy - 50)
+        titleHighLabel?.position = CGPoint(x: cx, y: cy - 110)
+        titleStoreLabel?.position = CGPoint(x: cx, y: cy - 152)
+        titleRestoreLabel?.position = CGPoint(x: cx, y: cy - 182)
         if transitionLabel != nil {
             transitionLabel.position = CGPoint(x: cx, y: cy + 30)
         }
@@ -683,15 +691,26 @@ final class GameScene: SKScene {
         titleLayer = SKNode()
         titleLayer.zPosition = 100
         addChild(titleLayer)
-        titleLayer.addChild(place(NodeFactory.titleLabel("CYBER", size: 56, color: Config.playerColor), cx, cy + 148))
-        titleLayer.addChild(place(NodeFactory.titleLabel("PONG", size: 56, color: Config.titleAccent), cx, cy + 86))
-        let tap = NodeFactory.hudLabel("TAP TO START", size: 21, color: Config.moonColor, alpha: 0.9)
-        tap.position = CGPoint(x: cx, y: cy - 50)
-        tap.run(pulseForever())
-        titleLayer.addChild(tap)
+        titleWordTop = NodeFactory.titleLabel("CYBER", size: 56, color: Config.playerColor)
+        titleLayer.addChild(place(titleWordTop, cx, cy + 148))
+        titleWordBottom = NodeFactory.titleLabel("PONG", size: 56, color: Config.titleAccent)
+        titleLayer.addChild(place(titleWordBottom, cx, cy + 86))
+        titleTapLabel = NodeFactory.hudLabel("TAP TO START", size: 21, color: Config.moonColor, alpha: 0.9)
+        titleTapLabel.position = CGPoint(x: cx, y: cy - 50)
+        titleTapLabel.run(pulseForever())
+        titleLayer.addChild(titleTapLabel)
         titleHighLabel = NodeFactory.hudLabel("HIGH SCORE 0", size: 14, color: Config.hudColor, alpha: 0.55)
         titleHighLabel.position = CGPoint(x: cx, y: cy - 120)
         titleLayer.addChild(titleHighLabel)
+
+        // Store row. Hidden until StoreKit answers, so an offline launch or a
+        // not-yet-configured product simply shows nothing rather than a dead button.
+        titleStoreLabel = NodeFactory.hudLabel("", size: 13, color: Config.titleAccent, alpha: 0.9)
+        titleStoreLabel.isHidden = true
+        titleLayer.addChild(titleStoreLabel)
+        titleRestoreLabel = NodeFactory.hudLabel("RESTORE", size: 11, color: Config.hudColor, alpha: 0.45)
+        titleRestoreLabel.isHidden = true
+        titleLayer.addChild(titleRestoreLabel)
 
         // Pause
         pauseLayer = SKNode()
@@ -805,10 +824,39 @@ final class GameScene: SKScene {
 
     // MARK: - Flow
 
+    /// Reflect purchase state on the title screen. Called on show and whenever
+    /// StoreKit reports a change.
+    private func refreshStoreRow() {
+        guard titleStoreLabel != nil else { return }
+        if Store.shared.isSupporter {
+            titleStoreLabel.display("SUPPORTER")
+            titleStoreLabel.tint = Config.playerColor
+            titleStoreLabel.isHidden = false
+            titleRestoreLabel.isHidden = true
+        } else if let price = Store.shared.displayPrice {
+            titleStoreLabel.display("SUPPORT \(price)")
+            titleStoreLabel.tint = Config.titleAccent
+            titleStoreLabel.isHidden = false
+            titleRestoreLabel.isHidden = false
+        } else {
+            // No product (offline / not yet live) — show nothing rather than a
+            // button that cannot work.
+            titleStoreLabel.isHidden = true
+            titleRestoreLabel.isHidden = true
+        }
+    }
+
+    /// Generous tap target for the small store text.
+    private func storeHit(_ node: PixelLabel?, _ loc: CGPoint) -> Bool {
+        guard let node, !node.isHidden else { return false }
+        return node.calculateAccumulatedFrame().insetBy(dx: -34, dy: -18).contains(loc)
+    }
+
     private func showTitle() {
         phase = .title
         lastPhaseChange = CACurrentMediaTime()
         titleHighLabel.display("HIGH SCORE \(highScore)")
+        refreshStoreRow()
         titleLayer.isHidden = false
         gameOverLayer.isHidden = true
         pauseLayer.isHidden = true
@@ -1574,6 +1622,20 @@ final class GameScene: SKScene {
         case .title, .gameOver:
             // Brief lockout so a stray tap right at game over doesn't restart.
             guard CACurrentMediaTime() - lastPhaseChange > 0.45 else { return }
+            // Store controls sit on the title screen where *any* tap starts a
+            // run, so they have to be claimed first or they'd be unreachable.
+            if phase == .title, !Store.shared.isSupporter {
+                if storeHit(titleStoreLabel, loc) {
+                    Audio.shared.uiTap()
+                    Task { _ = await Store.shared.purchase() }
+                    return
+                }
+                if storeHit(titleRestoreLabel, loc) {
+                    Audio.shared.uiTap()
+                    Task { _ = await Store.shared.restore() }
+                    return
+                }
+            }
             startRun()
         case .paused:
             if quitLabel.calculateAccumulatedFrame().insetBy(dx: -40, dy: -30).contains(loc) {

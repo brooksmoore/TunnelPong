@@ -18,6 +18,8 @@
 		A20000000000000000000008 /* PixelFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* PixelFont.swift */; };
 		A20000000000000000000009 /* Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* Audio.swift */; };
 		A2000000000000000000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* Assets.xcassets */; };
+		A2000000000000000000000B /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000B /* Store.swift */; };
+		A2000000000000000000000C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000C /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,6 +46,9 @@
 		A10000000000000000000008 /* PixelFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelFont.swift; sourceTree = "<group>"; };
 		A10000000000000000000009 /* Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audio.swift; sourceTree = "<group>"; };
 		A1000000000000000000000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A1000000000000000000000B /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		A1000000000000000000000C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A1000000000000000000000D /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Products.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -86,6 +91,9 @@
 				A10000000000000000000007 /* Haptics.swift */,
 				A1000000000000000000000A /* Assets.xcassets */,
 				A10000000000000000000009 /* Audio.swift */,
+				A1000000000000000000000D /* Products.storekit */,
+				A1000000000000000000000C /* PrivacyInfo.xcprivacy */,
+				A1000000000000000000000B /* Store.swift */,
 			);
 			path = TunnelPong;
 			sourceTree = "<group>";
@@ -187,6 +195,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A2000000000000000000000C /* PrivacyInfo.xcprivacy in Resources */,
 				A2000000000000000000000A /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -205,6 +214,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A2000000000000000000000B /* Store.swift in Sources */,
 				A20000000000000000000001 /* AppDelegate.swift in Sources */,
 				A20000000000000000000002 /* GameViewController.swift in Sources */,
 				A20000000000000000000003 /* Config.swift in Sources */,
