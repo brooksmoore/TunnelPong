@@ -16,7 +16,8 @@ struct Config {
 
     // MARK: - Tunnel look
     static let ringCount: Int = 13
-    static let ringCornerRadius: CGFloat = 30
+    /// 0 = hard square corners. The tunnel should read as cut, not extruded.
+    static let ringCornerRadius: CGFloat = 0
     static let ringLineWidthNear: CGFloat = 2.0
     static let ringLineWidthFar: CGFloat = 0.7
     static let ringAlphaNear: CGFloat = 0.50
@@ -175,28 +176,26 @@ struct Config {
     /// Title accent / hot pink horizon line.
     static let titleAccent   = SKColor(red: 1.00, green: 0.36, blue: 0.55, alpha: 1)
 
-    // MARK: - Sky (vertical gradient, black at top → hot pink at the horizon)
-    static let skyTop     = SKColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)
-    static let skyHigh    = SKColor(red: 0.07, green: 0.03, blue: 0.17, alpha: 1)
-    static let skyMid     = SKColor(red: 0.23, green: 0.11, blue: 0.42, alpha: 1)
-    static let skyLow     = SKColor(red: 0.56, green: 0.18, blue: 0.62, alpha: 1)
-    static let skyGlow    = SKColor(red: 0.91, green: 0.26, blue: 0.50, alpha: 1)
-    static let skyHot     = SKColor(red: 1.00, green: 0.40, blue: 0.49, alpha: 1)
-    /// Where the horizon sits, as a fraction of screen height from the bottom.
-    static let horizonFrac: CGFloat = 0.085
-    /// Silhouette peaks — effectively black, like the reference.
-    static let mountainColor = SKColor(red: 0.02, green: 0.01, blue: 0.04, alpha: 1)
-    /// Tallest peak height as a fraction of screen height.
-    static let mountainHeightFrac: CGFloat = 0.20
-    static let moonColor = SKColor.white
-    static let moonRadius: CGFloat = 13
-    /// Thin tapering diagonals (the reference's speed streaks).
-    static let streakColor = SKColor(red: 1.00, green: 0.24, blue: 0.43, alpha: 1)
-    static let streakAlpha: CGFloat = 0.30
+    // MARK: - Starfield
+    //
+    // The background is pure black. The only thing in it is a scatter of
+    // distant white stars — texture, never colour.
+    static let starCount = 110
+    static let starMinRadius: CGFloat = 0.5
+    static let starMaxRadius: CGFloat = 1.5
+    static let starMinAlpha: CGFloat = 0.18
+    static let starMaxAlpha: CGFloat = 0.85
+    static let starColor = SKColor.white
 
-    // MARK: - Impact flash
-    /// Paddle alpha dips to this on strike, then recovers.
-    static let paddleHitAlpha: CGFloat = 0.12
-    static let paddleHitFlashDown: CGFloat = 0.04
-    static let paddleHitFlashUp: CGFloat = 0.16
+    // MARK: - Impact glow
+    /// Paddles are hairline rects that bloom when the ball strikes them.
+    static let paddleCornerRadius: CGFloat = 14
+    /// Halo thickness on the glow layer that sits under each paddle.
+    static let paddleGlowWidth: CGFloat = 18
+    static let paddleGlowLineWidth: CGFloat = 4
+    /// Rise and fall of the strike bloom, seconds.
+    static let paddleGlowUp: CGFloat = 0.05
+    static let paddleGlowDown: CGFloat = 0.28
+    /// How far the halo swells past the paddle at peak.
+    static let paddleGlowScale: CGFloat = 1.10
 }

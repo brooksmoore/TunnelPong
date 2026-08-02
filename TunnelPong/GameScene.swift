@@ -164,33 +164,17 @@ final class GameScene: SKScene {
         renderWorld()
     }
 
-    /// Sunset sky, silhouette peaks, crescent, and light streaks. Rebuilt only
-    /// when the frame actually changes size — the sky is a rendered texture.
+    /// Black sky with a scatter of distant stars — texture only, no colour.
+    /// Rebuilt only when the frame actually changes size.
     private func rebuildBackdrop() {
         guard size.width > 0, size.height > 0, size != backdropSize else { return }
         backdropSize = size
         backdropNode.removeAllChildren()
 
-        let sky = SKSpriteNode(texture: NodeFactory.skyTexture(size: size))
-        sky.size = size
-        sky.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        sky.zPosition = 0
-        backdropNode.addChild(sky)
-
-        let streaks = NodeFactory.streaks(size: size)
-        streaks.zPosition = 1
-        backdropNode.addChild(streaks)
-
-        let moon = SKSpriteNode(texture: NodeFactory.moonTexture(radius: Config.moonRadius))
-        moon.position = CGPoint(x: size.width * 0.78, y: size.height * 0.83)
-        moon.zPosition = 2
-        backdropNode.addChild(moon)
-
-        // Peaks sit in front of the sky but behind the tunnel, so the wireframe
-        // reads as passing over the landscape.
-        let peaks = NodeFactory.mountains(size: size)
-        peaks.zPosition = 3
-        backdropNode.addChild(peaks)
+        let stars = SKSpriteNode(texture: NodeFactory.starFieldTexture(size: size))
+        stars.size = size
+        stars.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        backdropNode.addChild(stars)
     }
 
     /// Re-derive every ring path and corner rail from the current court size.
@@ -244,13 +228,13 @@ final class GameScene: SKScene {
         let maxTop = size.height - layoutTopInset - 36
         let cyberY = min(cy + 130, maxTop)
         let pongY = cyberY - 62
+        // Order matches buildOverlays: CYBER, PONG, tap prompt, high score.
         let kids = titleLayer.children
-        if kids.count >= 5 {
-            kids[0].position = CGPoint(x: cx, y: (cyberY + pongY) / 2) // glow
-            kids[1].position = CGPoint(x: cx, y: cyberY)                 // CYBER
-            kids[2].position = CGPoint(x: cx, y: pongY)                  // PONG
-            kids[3].position = CGPoint(x: cx, y: cy - 50)                // tap
-            kids[4].position = CGPoint(x: cx, y: cy - 110)               // high
+        if kids.count >= 4 {
+            kids[0].position = CGPoint(x: cx, y: cyberY)
+            kids[1].position = CGPoint(x: cx, y: pongY)
+            kids[2].position = CGPoint(x: cx, y: cy - 50)
+            kids[3].position = CGPoint(x: cx, y: cy - 110)
         }
         if transitionLabel != nil {
             transitionLabel.position = CGPoint(x: cx, y: cy + 30)
@@ -381,13 +365,6 @@ final class GameScene: SKScene {
         titleLayer = SKNode()
         titleLayer.zPosition = 100
         addChild(titleLayer)
-        // Soft magenta horizon glow behind the wordmark (c3 peak energy).
-        let glow = SKShapeNode(circleOfRadius: min(size.width, size.height) * 0.28)
-        glow.fillColor = Config.titleAccent.withAlphaComponent(0.12)
-        glow.strokeColor = .clear
-        glow.position = CGPoint(x: cx, y: cy + 100)
-        glow.zPosition = -1
-        titleLayer.addChild(glow)
         titleLayer.addChild(place(NodeFactory.titleLabel("CYBER", size: 58, color: Config.playerColor), cx, cy + 148))
         titleLayer.addChild(place(NodeFactory.titleLabel("PONG", size: 58, color: Config.titleAccent), cx, cy + 86))
         let tap = NodeFactory.hudLabel("TAP TO START", size: 18, color: .white, alpha: 0.85)
@@ -655,14 +632,24 @@ final class GameScene: SKScene {
         pulseRing(atZ: bz)
     }
 
-    /// Quick transparency dip on the paddle that just struck (visual hit feedback).
+    /// Bloom the struck paddle's halo — the paddle itself never dims, so the
+    /// hit reads as the paddle lighting up rather than blinking out.
     private func flashPaddle(_ node: SKNode) {
-        node.removeAction(forKey: "hitFlash")
-        node.alpha = 1
-        let down = SKAction.fadeAlpha(to: Config.paddleHitAlpha, duration: Config.paddleHitFlashDown)
-        let up = SKAction.fadeAlpha(to: 1.0, duration: Config.paddleHitFlashUp)
-        up.timingMode = .easeOut
-        node.run(SKAction.sequence([down, up]), withKey: "hitFlash")
+        guard let glow = node.childNode(withName: NodeFactory.impactGlowName) else { return }
+        glow.removeAllActions()
+        glow.alpha = 0
+        glow.setScale(1)
+        let bloom = SKAction.group([
+            SKAction.fadeAlpha(to: 1, duration: TimeInterval(Config.paddleGlowUp)),
+            SKAction.scale(to: Config.paddleGlowScale,
+                           duration: TimeInterval(Config.paddleGlowUp)),
+        ])
+        let settle = SKAction.group([
+            SKAction.fadeAlpha(to: 0, duration: TimeInterval(Config.paddleGlowDown)),
+            SKAction.scale(to: 1, duration: TimeInterval(Config.paddleGlowDown)),
+        ])
+        settle.timingMode = .easeOut
+        glow.run(SKAction.sequence([bloom, settle]))
     }
 
     /// Ball crossed a plane without a paddle — freeze on the plane, show feedback.
@@ -799,16 +786,10 @@ final class GameScene: SKScene {
     private func updateScoreHUD() { hudScoreLabel.display("\(score)") }
     private func updateLevelHUD() { hudLevelLabel.display("LV \(level)") }
     private func updateLivesHUD() {
-        // Spares are hearts. At zero spares an empty label would look broken,
-        // so name the state instead — this is the one-more-miss warning.
-        if playerLives <= 0 {
-            hudPlayerLives.display("LAST LIFE")
-            hudPlayerLives.tint = Config.opponentColor
-        } else {
-            hudPlayerLives.display(String(repeating: "◆", count: playerLives))
-            hudPlayerLives.tint = Config.playerColor
-        }
-        hudOppLives.display(String(repeating: "◆", count: max(opponentLives, 0)))
+        // Hearts are spare lives. An empty row is the warning — you're on your
+        // last life — so it needs no label.
+        hudPlayerLives.display(String(repeating: "♥", count: max(playerLives, 0)))
+        hudOppLives.display(String(repeating: "♥", count: max(opponentLives, 0)))
     }
 
     // MARK: - Update loop

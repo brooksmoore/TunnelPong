@@ -63,129 +63,35 @@ enum NodeFactory {
 
     // MARK: - Backdrop
 
-    /// Vertical sunset: black overhead falling through indigo and violet to a
-    /// hot pink band at the horizon, then snapping back to black underneath.
-    static func skyTexture(size: CGSize) -> SKTexture {
-        let h = Config.horizonFrac                      // from the bottom
-        // Locations are top→bottom, so invert the horizon fraction.
-        let stops: [(CGFloat, SKColor)] = [
-            (0.00,            Config.skyTop),
-            (0.34,            Config.skyHigh),
-            (0.60,            Config.skyMid),
-            (1 - h - 0.16,    Config.skyLow),
-            (1 - h - 0.045,   Config.skyGlow),
-            (1 - h,           Config.skyHot),
-            (min(1 - h + 0.05, 0.995), Config.skyLow),
-            (1.00,            Config.skyTop),
-        ]
+    /// Distant stars on pure black, baked into one texture so the scatter costs
+    /// a single node. Deterministically seeded, so a window resize re-renders
+    /// the same sky instead of reshuffling it.
+    static func starFieldTexture(size: CGSize) -> SKTexture {
+        var seed: UInt64 = 0x5EED_CAFE
+        func rnd() -> CGFloat {                 // xorshift, stable across runs
+            seed ^= seed << 13
+            seed ^= seed >> 7
+            seed ^= seed << 17
+            return CGFloat(seed % 100_000) / 100_000
+        }
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { ctx in
             let cg = ctx.cgContext
-            let colors = stops.map { $0.1.cgColor } as CFArray
-            let locations = stops.map { $0.0 }
-            guard let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                        colors: colors, locations: locations) else { return }
-            cg.drawLinearGradient(grad,
-                                  start: CGPoint(x: 0, y: 0),
-                                  end: CGPoint(x: 0, y: size.height),
-                                  options: [])
-        }
-        return SKTexture(image: image)
-    }
-
-    /// Crescent: a filled disc with a second disc punched out of it.
-    static func moonTexture(radius r: CGFloat) -> SKTexture {
-        let pad: CGFloat = 2
-        let side = (r + pad) * 2
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
-        let image = renderer.image { ctx in
-            let cg = ctx.cgContext
-            cg.setFillColor(Config.moonColor.cgColor)
-            cg.fillEllipse(in: CGRect(x: pad, y: pad, width: r * 2, height: r * 2))
-            cg.setBlendMode(.clear)
-            cg.fillEllipse(in: CGRect(x: pad + r * 0.52, y: pad - r * 0.14,
-                                      width: r * 2, height: r * 2))
-        }
-        return SKTexture(image: image)
-    }
-
-    /// Near-black peaks rising off the bottom edge. Overlapping triangles at
-    /// different heights, with one apex catching the horizon light.
-    static func mountains(size: CGSize) -> SKNode {
-        let root = SKNode()
-        let horizonY = size.height * Config.horizonFrac
-        let maxH = size.height * Config.mountainHeightFrac
-        // (centre x, half-base, height) as fractions — echoes the reference's
-        // two dominant peaks plus a shoulder.
-        let peaks: [(CGFloat, CGFloat, CGFloat)] = [
-            (0.28, 0.34, 0.74),
-            (0.63, 0.40, 1.00),
-            (0.90, 0.28, 0.60),
-        ]
-        for (i, p) in peaks.enumerated() {
-            let cx = size.width * p.0
-            let hb = size.width * p.1
-            let apexY = horizonY + maxH * p.2
-            let path = CGMutablePath()
-            path.move(to: CGPoint(x: cx - hb, y: 0))
-            path.addLine(to: CGPoint(x: cx, y: apexY))
-            path.addLine(to: CGPoint(x: cx + hb, y: 0))
-            path.closeSubpath()
-            let node = SKShapeNode(path: path)
-            node.fillColor = Config.mountainColor
-            node.strokeColor = .clear
-            node.zPosition = CGFloat(i)
-            root.addChild(node)
-
-            // Lit face on the tallest peak only — a sliver of horizon pink.
-            if p.2 == 1.00 {
-                let lit = CGMutablePath()
-                lit.move(to: CGPoint(x: cx, y: apexY))
-                lit.addLine(to: CGPoint(x: cx + hb * 0.30, y: apexY - maxH * 0.62))
-                lit.addLine(to: CGPoint(x: cx + hb * 0.06, y: apexY - maxH * 0.62))
-                lit.closeSubpath()
-                let litNode = SKShapeNode(path: lit)
-                litNode.fillColor = Config.titleAccent.withAlphaComponent(0.55)
-                litNode.strokeColor = .clear
-                litNode.zPosition = CGFloat(i) + 0.5
-                root.addChild(litNode)
+            cg.setFillColor(SKColor.black.cgColor)
+            cg.fill(CGRect(origin: .zero, size: size))
+            for _ in 0..<Config.starCount {
+                let x = rnd() * size.width
+                let y = rnd() * size.height
+                let r = Config.starMinRadius
+                    + rnd() * (Config.starMaxRadius - Config.starMinRadius)
+                let a = Config.starMinAlpha
+                    + rnd() * (Config.starMaxAlpha - Config.starMinAlpha)
+                cg.setFillColor(Config.starColor.withAlphaComponent(a).cgColor)
+                cg.fillEllipse(in: CGRect(x: x - r, y: y - r,
+                                          width: r * 2, height: r * 2))
             }
         }
-        return root
-    }
-
-    /// The reference's thin parallel diagonals — each shorter and fainter than
-    /// the last, like light trails leaving a peak.
-    static func streaks(size: CGSize) -> SKNode {
-        let root = SKNode()
-        // (origin x, origin y, count) as fractions of the frame.
-        let clusters: [(CGFloat, CGFloat, Int)] = [
-            (0.17, 0.72, 6),
-            (0.50, 0.55, 5),
-        ]
-        let angle: CGFloat = -0.62          // radians, down-left
-        for c in clusters {
-            let ox = size.width * c.0
-            let oy = size.height * c.1
-            for i in 0..<c.2 {
-                let step = CGFloat(i)
-                let len = size.height * (0.20 - step * 0.026)
-                guard len > 8 else { continue }
-                let sx = ox + step * 15
-                let sy = oy - step * 22
-                let path = CGMutablePath()
-                path.move(to: CGPoint(x: sx, y: sy))
-                path.addLine(to: CGPoint(x: sx + cos(angle) * len,
-                                         y: sy + sin(angle) * len))
-                let node = SKShapeNode(path: path)
-                node.strokeColor = Config.streakColor
-                node.lineWidth = 1
-                node.alpha = Config.streakAlpha * (1 - step * 0.13)
-                node.isAntialiased = true
-                root.addChild(node)
-            }
-        }
-        return root
+        return SKTexture(image: image)
     }
 
     // MARK: - Tunnel
@@ -224,16 +130,33 @@ enum NodeFactory {
 
     // MARK: - Actors
 
-    /// Hairline rectangle — no fill weight, so the paddle reads as drawn light
-    /// rather than a solid slab sitting on the art.
+    /// Name of the bloom layer parented under every paddle.
+    static let impactGlowName = "impactGlow"
+
+    /// Softly rounded hairline rectangle, with a dormant halo child that blooms
+    /// when the ball strikes it (see GameScene.flashPaddle).
     static func paddle(halfW: CGFloat, halfH: CGFloat, color: SKColor) -> SKShapeNode {
-        let node = SKShapeNode(rectOf: CGSize(width: halfW * 2, height: halfH * 2),
-                               cornerRadius: 3)
+        let size = CGSize(width: halfW * 2, height: halfH * 2)
+        let node = SKShapeNode(rectOf: size, cornerRadius: Config.paddleCornerRadius)
         node.fillColor = color.withAlphaComponent(0.07)
         node.strokeColor = color
         node.lineWidth = 1.6
         node.glowWidth = 4
         node.isAntialiased = true
+
+        // Separate node because SKShapeNode.glowWidth can't be animated — the
+        // halo is drawn once and its alpha/scale are what actually move.
+        let glow = SKShapeNode(rectOf: size, cornerRadius: Config.paddleCornerRadius)
+        glow.fillColor = .clear
+        glow.strokeColor = color
+        glow.lineWidth = Config.paddleGlowLineWidth
+        glow.glowWidth = Config.paddleGlowWidth
+        glow.isAntialiased = true
+        glow.alpha = 0
+        glow.zPosition = -1
+        glow.name = impactGlowName
+        node.addChild(glow)
+
         return node
     }
 
