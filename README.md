@@ -3,7 +3,8 @@
 2.5D retrowave tunnel Pong: look down a neon wireframe hallway, drag your paddle,
 volley against an AI at the far end. **Endless high-score chase** — no ending,
 just how deep you get. Pure SpriteKit, zero assets, zero dependencies. iOS 17+,
-iPhone (+ Mac Catalyst desktop play), portrait locked.
+iPhone / iPad (+ Mac Catalyst desktop play). Portrait and landscape — tunnel
+resizes to the device aspect; rules stay the same.
 
 **v1 is feature-complete for solo play.** Pause before v2 multiplayer until the
 STATUS gate is green (device feel, Config freeze, cold second-person test).

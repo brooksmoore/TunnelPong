@@ -167,36 +167,74 @@ final class GameScene: SKScene {
     }
 
     /// Heart row in the safe-top / Island-ear band — always *above* the tunnel.
+    /// In landscape (shallow top safe area) keep a compact top margin.
     private func heartsBandY() -> CGFloat {
         let topSafe = max(safeInsets.top, 0)
         if topSafe >= 44 {
             return size.height - topSafe * 0.48
         }
-        // Mac titlebar / small inset.
-        return size.height - max(topSafe, 8) - 16
+        // Landscape phone / Mac titlebar / small inset.
+        let compact = size.height < size.width ? 12.0 : 16.0
+        return size.height - max(topSafe, 8) - compact
     }
 
-    /// Immersive court: safe vertical band under hearts, above bottom score bar.
-    /// Sky shows around the tunnel (not a full-frame bezel).
+    /// Immersive court: safe band under hearts, above bottom score, inside
+    /// left/right safe insets. Rebuilds on any orientation or Mac resize —
+    /// world halfW/halfH track the view aspect; speeds & paddle sizes stay
+    /// fixed in world units (same rules, different field shape).
     private func applyCourtMetrics() {
         let topSafe = max(safeInsets.top, 0)
         let botSafe = max(safeInsets.bottom, 0)
+        let leftSafe = max(safeInsets.left, 0)
+        let rightSafe = max(safeInsets.right, 0)
+
         let heartsY = heartsBandY()
-        let underHearts = heartsY - Config.heartsToCourtGap
+        // Landscape: less vertical room — tighter gap under hearts so the tunnel
+        // keeps height; portrait keeps the roomier clearance.
+        let landscape = size.width > size.height
+        let heartsGap = landscape
+            ? min(Config.heartsToCourtGap, 18)
+            : Config.heartsToCourtGap
+        let underHearts = heartsY - heartsGap
         let underSafe = size.height - topSafe - Config.courtTopPad
         courtTopY = min(underHearts, underSafe)
-        let courtBottomY = botSafe + Config.courtBottomPad + Config.bottomScoreBand
-        if courtTopY - courtBottomY < 220 {
-            courtTopY = courtBottomY + 220
+
+        let scoreBand = landscape
+            ? min(Config.bottomScoreBand, 36)
+            : Config.bottomScoreBand
+        let courtBottomY = botSafe + Config.courtBottomPad + scoreBand
+
+        // Preferred min height, but never steal more than ~55% of short screens.
+        let preferredMin = Config.courtMinHeightPreferred
+        let adaptiveMin = max(Config.courtMinHeightFloor,
+                              min(preferredMin, size.height * 0.55))
+        if courtTopY - courtBottomY < adaptiveMin {
+            courtTopY = min(size.height - topSafe - 4, courtBottomY + adaptiveMin)
         }
-        proj.center = CGPoint(x: size.width / 2, y: (courtTopY + courtBottomY) / 2)
-        halfW = size.width / 2 * Config.courtWidthFactor
-        halfH = (courtTopY - courtBottomY) / 2 * Config.courtHeightFactor
+
+        let usableW = max(1, size.width - leftSafe - rightSafe - Config.courtSidePad * 2)
+        let centerX = leftSafe + Config.courtSidePad + usableW / 2
+        let centerY = (courtTopY + courtBottomY) / 2
+        proj.center = CGPoint(x: centerX, y: centerY)
+
+        halfW = usableW / 2 * Config.courtWidthFactor
+        halfH = max(1, (courtTopY - courtBottomY) / 2 * Config.courtHeightFactor)
     }
 
-    /// Call after safeInsets or size change (Mac resize, notch, titlebar).
+    /// Call after safeInsets or size change (rotation, Mac resize, notch, titlebar).
     func applyChromeLayout() {
         applyCourtMetrics()
+        // Keep actors inside the new bounds (landscape ↔ portrait mid-rally).
+        clampPlayer()
+        clampOpponent()
+        clampBallXY()
+        if var t = touchTarget {
+            let mx = max(0, halfW - Config.playerPaddleHalfW)
+            let my = max(0, halfH - Config.playerPaddleHalfH)
+            t.x = max(-mx, min(mx, t.x))
+            t.y = max(-my, min(my, t.y))
+            touchTarget = t
+        }
         rebuildBackdrop()
         rebuildTunnelGeometry()
         layoutHUD()
@@ -1208,10 +1246,24 @@ final class GameScene: SKScene {
     }
 
     private func clampPlayer() {
-        let mx = halfW - Config.playerPaddleHalfW
-        let my = halfH - Config.playerPaddleHalfH
+        let mx = max(0, halfW - Config.playerPaddleHalfW)
+        let my = max(0, halfH - Config.playerPaddleHalfH)
         px = max(-mx, min(mx, px))
         py = max(-my, min(my, py))
+    }
+
+    private func clampOpponent() {
+        let mx = max(0, halfW - Config.oppPaddleHalfW)
+        let my = max(0, halfH - Config.oppPaddleHalfH)
+        ox = max(-mx, min(mx, ox))
+        oy = max(-my, min(my, oy))
+    }
+
+    private func clampBallXY() {
+        let effW = max(0, halfW - Config.ballRadius)
+        let effH = max(0, halfH - Config.ballRadius)
+        bx = max(-effW, min(effW, bx))
+        by = max(-effH, min(effH, by))
     }
 
     /// Absolute mapping — Mac pointer only. Screen → world at z = 0 is a
@@ -1251,8 +1303,8 @@ final class GameScene: SKScene {
         let wantX = dragAnchorPaddle.x + (loc.x - anchor.x) * g
         let wantY = dragAnchorPaddle.y + (loc.y - anchor.y) * g
 
-        let mx = halfW - Config.playerPaddleHalfW
-        let my = halfH - Config.playerPaddleHalfH
+        let mx = max(0, halfW - Config.playerPaddleHalfW)
+        let my = max(0, halfH - Config.playerPaddleHalfH)
         let clampedX = max(-mx, min(mx, wantX))
         let clampedY = max(-my, min(my, wantY))
 
@@ -1429,8 +1481,8 @@ final class GameScene: SKScene {
         ox = CourtMath.moveToward(ox, target: tx, maxStep: step)
         oy = CourtMath.moveToward(oy, target: ty, maxStep: step)
 
-        let mx = halfW - Config.oppPaddleHalfW
-        let my = halfH - Config.oppPaddleHalfH
+        let mx = max(0, halfW - Config.oppPaddleHalfW)
+        let my = max(0, halfH - Config.oppPaddleHalfH)
         ox = max(-mx, min(mx, ox))
         oy = max(-my, min(my, oy))
     }

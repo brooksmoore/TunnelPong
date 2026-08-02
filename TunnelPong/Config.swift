@@ -14,10 +14,15 @@ struct Config {
     //
     // Court sits in the safe vertical band under the heart row and above the
     // bottom score bar — sky/margins around the tunnel keep the depth read.
-    /// Horizontal fill of the view at the near plane (slightly under full width).
+    // Portrait, landscape, and free Mac resize all rebuild halfW/halfH from the
+    // current view; physics stays in world units so rules feel the same while
+    // the playing field aspect tracks the device.
+    /// Horizontal fill of the *usable* width (inside left/right safe insets).
     static let courtWidthFactor: CGFloat = 0.96
     /// Vertical fill of the play band (between hearts and bottom score).
     static let courtHeightFactor: CGFloat = 1.0
+    /// Extra inset from left/right safe edges before the near wall.
+    static let courtSidePad: CGFloat = 6
     /// Gap under safe-top / hearts before the near wall.
     static let courtTopPad: CGFloat = 10
     static let courtBottomPad: CGFloat = 8
@@ -25,6 +30,10 @@ struct Config {
     static let heartsToCourtGap: CGFloat = 30
     /// Reserved height at the bottom for score + serve hint (inside play band).
     static let bottomScoreBand: CGFloat = 48
+    /// Prefer at least this much court height when the screen allows it.
+    static let courtMinHeightPreferred: CGFloat = 220
+    /// Floor for very short landscape (e.g. SE landscape) so the tunnel still fits.
+    static let courtMinHeightFloor: CGFloat = 140
 
     // MARK: - Pixel grid (modern GBC)
     //

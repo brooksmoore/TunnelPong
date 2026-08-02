@@ -735,3 +735,50 @@ than deleting so the choice is visible.
   deployment target still exceeds this Mac's).
 
 ---
+
+## 2026-08-02 — Landscape + any-aspect court (Grok)
+
+**Request:** Rotate into landscape; tunnel/game resize to any device aspect;
+mechanics same; playing field shape follows the screen.
+
+### Changes
+| Area | What |
+|------|------|
+| Orientations | Phone: portrait + both landscapes (`allButUpsideDown`). iPad: all. Info.plist keys updated. |
+| Court metrics | `halfW`/`halfH` from usable safe band (left/right + top/bottom). Landscape tightens hearts gap + score band. Adaptive min court height for short landscape. |
+| Resize safety | On layout: re-clamp player/AI/ball + touch target so mid-rally rotate stays legal. |
+| Mac Catalyst | Free window aspect (min 360×320, max 2400×1800); still rebuilds tunnel via `applyChromeLayout`. |
+
+### Unchanged (by design)
+- Ball speed, paddle sizes, AI speed, english — fixed world units.
+- Wider landscape → wider field; shorter height → shorter field. Rules identical.
+
+### Verified
+- Mac Catalyst `bin/play-mac.sh` → **BUILD SUCCEEDED**, launched.
+
+---
+
+## 2026-08-02 — Mac window resize actually unlocks (Grok)
+
+**Bug:** Dragging the Mac window did nothing — stayed fixed vertical phone shell.
+
+**Cause:** Catalyst sizeRestrictions were set once at launch when `windowScene` was often still nil (optional chaining no-op). Host AppKit window also needed resizable style + cleared aspect lock.
+
+**Fix (`AppDelegate`):** Re-apply sizeRestrictions (360×300…4096×4096) on async/active/appear; unlock host NSWindow via KVC (`styleMask` resizable, `contentAspectRatio` zero, min/max size); walk `NSApplication.windows` as backup.
+
+### Verified
+- BUILD SUCCEEDED, relaunched. Human: drag edges to widen.
+
+---
+
+## 2026-08-02 — Crash on launch from resize KVC (Grok)
+
+**Symptom:** TunnelPong quits immediately (SIGSEGV 139).
+
+**Cause:** `AppDelegate.unlockHostWindow` used `value(forKey: "nsWindow")` / AppKit KVC.
+Missing keys raise `NSException` → `EXC_BAD_ACCESS` on main thread (not Swift-catchable).
+
+**Fix:** Removed all AppKit KVC unlock paths. Mac resize uses only
+`UIWindowScene.sizeRestrictions` (safe). App stays up (verified pid after launch).
+
+---

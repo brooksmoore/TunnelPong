@@ -14,7 +14,7 @@ Ephemeral ship state → `STATUS.md`. Dated history → `LEDGER.md` (append-only
 **Lives are spare lives.** 3 hearts = 4 misses; empty heart row = last life. Clear level → +1 spare, cap 3.
 
 - Bundle ID: `com.brooksmoore.tunnelpong`
-- Platforms: iOS 17+ iPhone (portrait); Mac Catalyst for desktop debug
+- Platforms: iOS 17+ iPhone/iPad (portrait + landscape); Mac Catalyst free resize
 - v1 feature-wrapped — **do not start v2** until STATUS gate is green
 
 ---

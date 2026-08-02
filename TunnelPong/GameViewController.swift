@@ -52,14 +52,25 @@ final class GameViewController: UIViewController {
 
         // Resize / rotation / safe-area updates: keep scene + chrome in sync.
         if let scene = gameScene {
-            let sizeChanged = scene.size != skView.bounds.size
+            let newSize = skView.bounds.size
+            let sizeChanged = abs(scene.size.width - newSize.width) > 0.5
+                || abs(scene.size.height - newSize.height) > 0.5
             scene.safeInsets = insets
             if sizeChanged {
-                scene.size = skView.bounds.size
+                scene.size = newSize
             }
+            // Always re-layout chrome: safe insets can change without size (notch side).
             scene.applyChromeLayout()
         }
     }
+
+    #if targetEnvironment(macCatalyst)
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Host NSWindow is reliably attached once we're on-screen.
+        (UIApplication.shared.delegate as? AppDelegate)?.refreshMacWindowPolicy()
+    }
+    #endif
 
     /// Notch / home indicator on phone; titlebar reserve on Mac Catalyst.
     private func effectiveSafeInsets(for skView: SKView) -> UIEdgeInsets {
@@ -92,11 +103,14 @@ final class GameViewController: UIViewController {
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
+    override var shouldAutorotate: Bool { true }
+    /// Portrait + both landscapes on phone/iPad; any orientation on Mac.
+    /// Upside-down portrait omitted (awkward thumb grip / home indicator).
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         #if targetEnvironment(macCatalyst)
         return .all
         #else
-        return .portrait
+        return .allButUpsideDown
         #endif
     }
 }
