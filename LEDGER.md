@@ -335,3 +335,58 @@ Gate #1 → **IN PROGRESS** (need multiple sessions, not one launch). Still do n
 
 ### Review ask
 Claude: verify serve/AI reset, Catalyst/iOS chrome, L1–L10 difficulty leash, and that nothing multiplayer was half-wired.
+
+## 2026-08-01 — Claude audit of Grok's wrap + endless-mode rules
+
+**Actor:** Claude (Opus 5). Grok's 852-line CyberPong wrap was committed as-is
+first (`fc6193a`) so his work stayed attributable before any edits.
+
+### Audit verdict
+
+Implementation is sound. Gate discipline **held** — no multiplayer half-wired;
+`PeerMirror` still inert, referenced only by tests. 20/20 tests passed on his
+code as received. Findings were tuning-honesty and edge cases, not foundations.
+
+### Findings
+
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | 852 lines of the wrap uncommitted | Committed + pushed before edits |
+| 2 | Campaign needed ~95% point-win rate over 30 points to finish (36.7% run completion at p=0.90, 12% at p=0.85) | Replaced with endless mode per Brooks |
+| 3 | `aiLateralFrac*` never binds at any level — yet README dial #3, MEMORY, and Config all called it "the real leash" | Kept as safety ceiling; docs corrected to `aiSpeedL1/L10` |
+| 4 | Mac window resize desynced tunnel from play area (`applyChromeLayout` recomputed halfW/halfH but never rebuilt ring paths; corner rails never referenced after creation) | Fixed |
+| 5 | Dead code: `serveTouchedBall` written 3× never read; `segmentHitsBall`/`isOnBall` fed only that flag; `playerMiss`/`opponentMiss` never called; `paddleSmoothing`/`serveBallHitPad` unread | Removed |
+| 6 | `TARGETED_DEVICE_FAMILY = "1,2"` vs iPhone-only docs | Noted, not changed (Catalyst needs it) |
+| 7 | No app icon (placeholder grid on home screen) | Open — Brooks wants to design together |
+
+### Design decision (Brooks, locked)
+
+**There is no "win".** CyberPong is an endless high-score chase like every great
+iOS arcade game. `Config.maxLevel = 10` is a *difficulty ceiling* — "as hard as
+it gets without being impossible," where impossible = an opponent too fast to
+get past. Levels count up forever; the curve holds at L10.
+
+**Lives are spare lives.** 3 hearts = 4 misses; at 0 hearts the HUD reads
+`LAST LIFE`. Clearing a level returns one spare, capped at 3 — no banking lives
+you never lost, so the pressure never fully lifts.
+
+### Code changes
+
+- Endless: removed `winRun()`, `endRun(won:)` → `endRun()`, level uncapped,
+  `LV n` replaces `LV n/10`.
+- Lives: `playerLivesMax` + `lifeGainPerLevel` replace `extraLifeEveryNLevels`;
+  run ends at `playerLives < 0`; `LAST LIFE` HUD state.
+- `rebuildTunnelGeometry()` re-derives ring paths + corner rails on every
+  layout change; pause dim now resizes too.
+- Dead code purge (finding 5).
+
+### Verified
+
+Xcode 26.1 / iPhone 17 / iOS 26.1: build clean, **20/20 tests pass**.
+
+### Still open for v1
+
+App icon (needs real PNGs — the one place "zero assets" must bend), theme pass,
+feel tweaks. v2 gate remains CLOSED.
+
+---

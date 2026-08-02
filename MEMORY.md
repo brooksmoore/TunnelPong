@@ -7,7 +7,11 @@ Ephemeral ship state → `STATUS.md`. Dated history → `LEDGER.md` (append-only
 
 ## What this is
 
-**CyberPong** (repo folder still `TunnelPong`): solo 2.5D SpriteKit tunnel Pong, retrowave theme, 10-level campaign. Pure code, zero assets, zero packages.
+**CyberPong** (repo folder still `TunnelPong`): solo 2.5D SpriteKit tunnel Pong, retrowave theme, **endless high-score chase**. Pure code, zero assets, zero packages.
+
+**Core design rule (Brooks, 2026-08-01): there is no "win".** Like every great iOS arcade game, the score is the point. Levels count up forever; `Config.maxLevel` (10) is a *difficulty ceiling*, not an ending — L10 is "as hard as it gets without being impossible," and impossible means an opponent too fast to get past.
+
+**Lives are spare lives.** 3 hearts = 4 misses; at 0 hearts the HUD reads `LAST LIFE`. Clearing a level returns one spare, capped at 3 — you can't bank lives you never lost.
 
 - Bundle ID: `com.brooksmoore.tunnelpong`
 - Platforms: iOS 17+ iPhone (portrait); Mac Catalyst for desktop debug
@@ -27,7 +31,7 @@ Ephemeral ship state → `STATUS.md`. Dated history → `LEDGER.md` (append-only
 | `AppDelegate.swift` | Window; Mac phone-shaped frame |
 | `bin/play-mac.sh` | Build+launch Catalyst (derived data off Desktop) |
 
-**Physics:** z-crossing paddle hits (not screen overlap). English on off-center hits. AI leashed so XY speed ≤ fraction of ball max lateral (L10 ≈ 0.94, never 1.0).
+**Physics:** z-crossing paddle hits (not screen overlap). English on off-center hits. `aiLateralFrac*` is a *safety ceiling only* — it never binds at current `aiSpeed` values (verified L1–L10); **`aiSpeedL1/L10` is the real AI-reach dial.**
 
 **Player:** full paddle snap always (no skill ramp).  
 **AI + ball speed + english + reaction:** ramp L1→L10 only.

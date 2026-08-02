@@ -30,8 +30,6 @@ struct Config {
     static let ballDrawScale: CGFloat = 1.08
     /// Extra english when the paddle *corner* is on the ball at serve (0–1 scale).
     static let serveCornerBoost: CGFloat = 0.40
-    /// Hit-test padding around the ball in screen points (serve strike).
-    static let serveBallHitPad: CGFloat = 22
     /// Minimum share of total speed kept along z, so the ball can't stall
     /// bouncing sideways after heavy english.
     static let minVzFraction: CGFloat = 0.55
@@ -50,7 +48,6 @@ struct Config {
     static let playerPaddleHalfW: CGFloat = 72
     static let playerPaddleHalfH: CGFloat = 52
     static let paddleHitSlop: CGFloat = 14
-    static let paddleSmoothing: CGFloat = 999
     static let touchOffsetY: CGFloat = 95
 
     // MARK: - Opponent size (fixed; skill ramps below)
@@ -69,7 +66,9 @@ struct Config {
     // fraction of the ball's max lateral component so L10 is hard, not
     // mathematically unwinnable.
 
-    /// Final campaign level. Clearing it wins the run.
+    /// Difficulty ceiling, NOT an ending. Play is endless: levels keep counting
+    /// up (LV 11, 12, …) but every ramping value clamps at its L10 endpoint.
+    /// This is the "as hard as it gets without being impossible" line.
     static let maxLevel = 10
 
     /// 0 at level 1 → 1 at level 10 (clamped).
@@ -95,10 +94,16 @@ struct Config {
     static let serveDragL1: CGFloat = 180
     static let serveDragL10: CGFloat = 340
 
-    // AI absolute move speed (secondary; lateral fraction is the real leash)
+    // AI paddle move speed. THIS is the dial that actually governs AI reach —
+    // at current numbers it is always the binding constraint (95→500 sits well
+    // under the lateral ceiling below at every level). Tune these.
     static let aiSpeedL1: CGFloat = 95
     static let aiSpeedL10: CGFloat = 500
-    /// AI XY as fraction of ball max lateral speed. L10 ≈ ball XY but not 1.0.
+    /// Safety ceiling only: caps AI XY at a fraction of the ball's max lateral
+    /// speed so the opponent can never be mathematically un-passable. Inert at
+    /// the aiSpeed values above (never binds) — it exists so that raising
+    /// aiSpeedL10 later can't accidentally create an unbeatable wall.
+    /// Kept below 1.0 on purpose: the ball must always be able to out-run it.
     static let aiLateralFracL1: CGFloat = 0.42
     static let aiLateralFracL10: CGFloat = 0.94
     // Aim error (world units). High early → sparse late.
@@ -112,9 +117,19 @@ struct Config {
     static let aiIdleL10: CGFloat = 0.55
 
     // MARK: - Rules
+    //
+    // Lives are *spare* lives — the hearts in the HUD are what you have left
+    // over. At 0 hearts you are playing your last life; the next miss ends the
+    // run. So 3 hearts = 4 total misses.
+    //
+    /// Spare lives at the start of a run.
     static let playerLives = 3
+    /// Hard cap on spares. Clearing a level grants one back, but only up to
+    /// this — you can't bank lives you never lost.
+    static let playerLivesMax = 3
+    /// Spare lives granted for clearing a level (capped by playerLivesMax).
+    static let lifeGainPerLevel = 1
     static let opponentLivesPerLevel = 3
-    static let extraLifeEveryNLevels = 0
     static let scorePerHit = 10
     static let scorePerOpponentLife = 100
 

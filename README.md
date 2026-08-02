@@ -1,8 +1,9 @@
 # CyberPong (iOS, v1 — wrapped)
 
 2.5D retrowave tunnel Pong: look down a neon wireframe hallway, drag your paddle,
-volley against an AI at the far end. Pure SpriteKit, zero assets, zero
-dependencies. iOS 17+, iPhone (+ Mac Catalyst desktop play), portrait locked.
+volley against an AI at the far end. **Endless high-score chase** — no ending,
+just how deep you get. Pure SpriteKit, zero assets, zero dependencies. iOS 17+,
+iPhone (+ Mac Catalyst desktop play), portrait locked.
 
 **v1 is feature-complete for solo play.** Pause before v2 multiplayer until the
 STATUS gate is green (device feel, Config freeze, cold second-person test).
@@ -53,19 +54,33 @@ A legacy `/Applications/Xcode.app` Simulator (v13.x) can crash on modern macOS
 
 ## If the difficulty feels wrong, tune these first (`Config.swift`)
 
-Campaign is **10 levels**, linear L1→L10. Each ramping variable has an `*L1` and `*L10` pair — edit those endpoints, not ad-hoc multipliers.
+Difficulty ramps linearly L1→L10 and then **holds at L10 forever**. Each ramping
+variable has an `*L1` and `*L10` pair — edit those endpoints, not ad-hoc multipliers.
 
-1. **`aiErrorL1` / `aiErrorL10`** — aim noise (higher = easier).
+1. **`aiErrorL1` / `aiErrorL10`** — aim noise (higher = easier). Strongest dial.
 2. **`ballSpeedL1` / `ballSpeedL10`** — ball speed.
-3. **`aiLateralFracL1` / `aiLateralFracL10`** — AI XY as a fraction of ball lateral max (L10 ≈ 0.94, never 1.0).
+3. **`aiSpeedL1` / `aiSpeedL10`** — how fast the AI paddle travels.
+
+`aiLateralFracL1/L10` is **not** a tuning dial — it's a safety ceiling that keeps
+the AI from ever becoming mathematically un-passable. It never binds at the
+current `aiSpeed` values; it only matters if you raise `aiSpeedL10` a lot.
 
 Player paddle does **not** ramp. When dials stop moving every session, mark that on the v2 gate in `STATUS.md`.
 
 ## Rules (solo v1)
 
-- You: 3 lives for the run. Opponent: 3 per level. **10 levels** total; clear L10 → win.
-- Difficulty is linear from L1 (calibrated easy) to L10 (near-max AI + physics).
-- Score: 10 × level per hit, 100 × level per opponent life. High score in `UserDefaults`.
+**Endless high-score chase — there is no "win".** Levels count up forever; the
+difficulty curve maxes out at L10 and stays there. The run ends when you run out
+of lives, and the high score is the game.
+
+- **Lives are *spare* lives.** The HUD hearts are what you have left over. Start
+  with 3. At **0 hearts the HUD reads `LAST LIFE`** — the next miss ends the run.
+  So 3 hearts = 4 misses.
+- **Clearing a level returns one spare, capped at 3.** You can't bank lives you
+  never lost, so a clean level grants nothing and the pressure never fully lifts.
+- Opponent: 3 lives per level. Take all 3 → next level.
+- Score: 10 × level per hit, 100 × level per opponent life. Since level is
+  uncapped, deep runs are worth exponentially more. High score in `UserDefaults`.
 
 ## Tests
 
@@ -75,7 +90,7 @@ Xcode → **⌘U**. Covers perspective, wall fold, velocity renorm, ring helpers
 
 | Version | Status |
 |---------|--------|
-| v1 solo | **Current** |
+| v1 solo (endless score chase) | **Current** |
 | v2 local 1v1 (Multipeer, split authority) | Gated — see STATUS |
 | v3 internet (GameKit) | Deferred; prefer ghost/leaderboards unless demand |
 

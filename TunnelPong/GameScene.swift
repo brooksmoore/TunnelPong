@@ -53,7 +53,6 @@ final class GameScene: SKScene {
     // Serve strike tracking (Mac: click/drag on ball; iOS: drag across ball).
     private var serveDragPrev: CGPoint?
     private var serveDragDelta: CGPoint = .zero
-    private var serveTouchedBall = false
 
     // MARK: - Paddles (world coordinates)
 
@@ -74,7 +73,9 @@ final class GameScene: SKScene {
 
     private let worldNode = SKNode()
     private var rings: [SKShapeNode] = []
+    private var cornerLines: [SKShapeNode] = []
     private var ringPulses: [SKAction] = []
+    private var pauseDim: SKSpriteNode!
     private var ballNode: SKNode!
     private var playerPaddleNode: SKShapeNode!
     private var oppPaddleNode: SKShapeNode!
@@ -141,17 +142,46 @@ final class GameScene: SKScene {
         proj.center = CGPoint(x: size.width / 2, y: size.height / 2)
         halfW = size.width / 2 * Config.courtWidthFactor
         halfH = size.height / 2 * Config.courtHeightFactor
-        // Keep tunnel rings aligned to current center if they already exist.
-        for node in rings {
-            node.position = proj.center
-        }
+        // halfW/halfH ARE the ball's walls, so the drawn tunnel has to be
+        // rebuilt from them — repositioning alone would leave the wireframe
+        // describing the old court after a Mac window resize.
+        rebuildTunnelGeometry()
         layoutHUD()
         layoutOverlays()
         if flashNode != nil {
             flashNode.position = proj.center
             flashNode.size = CGSize(width: size.width * 1.2, height: size.height * 1.2)
         }
+        if pauseDim != nil {
+            pauseDim.position = proj.center
+            pauseDim.size = CGSize(width: size.width * 1.2, height: size.height * 1.2)
+        }
         renderWorld()
+    }
+
+    /// Re-derive every ring path and corner rail from the current court size.
+    /// Safe to call before the tunnel exists (arrays are empty).
+    private func rebuildTunnelGeometry() {
+        for (i, node) in rings.enumerated() {
+            let t = CourtMath.ringT(index: i, ringCount: Config.ringCount)
+            let s = proj.scale(z: Config.zFar * t)
+            let w = halfW * s, h = halfH * s
+            let r = Config.ringCornerRadius * s
+            node.path = CGPath(roundedRect: CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h),
+                               cornerWidth: r, cornerHeight: r, transform: nil)
+            node.position = proj.center
+        }
+        var i = 0
+        for sx: CGFloat in [-1, 1] {
+            for sy: CGFloat in [-1, 1] {
+                guard i < cornerLines.count else { return }
+                let path = CGMutablePath()
+                path.move(to: proj.project(x: sx * halfW, y: sy * halfH, z: 0))
+                path.addLine(to: proj.project(x: sx * halfW, y: sy * halfH, z: Config.zFar))
+                cornerLines[i].path = path
+                i += 1
+            }
+        }
     }
 
     private func layoutHUD() {
@@ -229,6 +259,7 @@ final class GameScene: SKScene {
                 let line = NodeFactory.cornerLine(from: p0, to: p1)
                 line.zPosition = 2
                 worldNode.addChild(line)
+                cornerLines.append(line)
             }
         }
     }
@@ -336,11 +367,11 @@ final class GameScene: SKScene {
         // Pause
         pauseLayer = SKNode()
         pauseLayer.zPosition = 100
-        let dim = SKSpriteNode(color: .black,
-                               size: CGSize(width: size.width * 1.2, height: size.height * 1.2))
-        dim.position = proj.center
-        dim.alpha = 0.7
-        pauseLayer.addChild(dim)
+        pauseDim = SKSpriteNode(color: .black,
+                                size: CGSize(width: size.width * 1.2, height: size.height * 1.2))
+        pauseDim.position = proj.center
+        pauseDim.alpha = 0.7
+        pauseLayer.addChild(pauseDim)
         pauseLayer.addChild(place(NodeFactory.titleLabel("PAUSED", size: 36, color: Config.playerColor), cx, cy + 70))
         pauseLayer.addChild(place(NodeFactory.hudLabel("TAP TO RESUME", size: 16, color: .white, alpha: 0.75), cx, cy))
         quitLabel = NodeFactory.hudLabel("QUIT", size: 20, color: Config.opponentColor, alpha: 0.95)
@@ -533,33 +564,6 @@ final class GameScene: SKScene {
     private func clearServeGesture() {
         serveDragPrev = nil
         serveDragDelta = .zero
-        serveTouchedBall = false
-    }
-
-    /// Screen-space test: is this point on (or near) the ball?
-    private func isOnBall(_ loc: CGPoint) -> Bool {
-        let p = proj.project(x: bx, y: by, z: bz)
-        let r = Config.ballRadius * proj.scale(z: bz) * Config.ballDrawScale
-            + Config.serveBallHitPad
-        let dx = loc.x - p.x, dy = loc.y - p.y
-        return dx * dx + dy * dy <= r * r
-    }
-
-    /// True if the segment from a→b enters the ball's screen circle.
-    private func segmentHitsBall(_ a: CGPoint, _ b: CGPoint) -> Bool {
-        if isOnBall(a) || isOnBall(b) { return true }
-        let c = proj.project(x: bx, y: by, z: bz)
-        let r = Config.ballRadius * proj.scale(z: bz) * Config.ballDrawScale
-            + Config.serveBallHitPad
-        let abx = b.x - a.x, aby = b.y - a.y
-        let acx = c.x - a.x, acy = c.y - a.y
-        let ab2 = abx * abx + aby * aby
-        guard ab2 > 0.001 else { return false }
-        var t = (acx * abx + acy * aby) / ab2
-        t = max(0, min(1, t))
-        let px = a.x + abx * t - c.x
-        let py = a.y + aby * t - c.y
-        return px * px + py * py <= r * r
     }
 
     /// Opponent auto-serve (toward you).
@@ -663,33 +667,22 @@ final class GameScene: SKScene {
             updateLivesHUD()
             nextServer = .player   // you scored → you serve
             if opponentLives <= 0 {
-                if level >= Config.maxLevel {
-                    winRun()
-                } else {
-                    levelUp()
-                }
+                levelUp()          // endless: there is no final level to win
             } else {
                 scheduleServe()
             }
         } else {
+            // Hearts are SPARE lives. Going 0 → -1 means you were on your last
+            // life and just lost it, so the run ends there (3 hearts = 4 misses).
             playerLives -= 1
             updateLivesHUD()
             nextServer = .opponent // they scored → they serve
-            if playerLives <= 0 {
-                endRun(won: false)
+            if playerLives < 0 {
+                endRun()
             } else {
                 scheduleServe()
             }
         }
-    }
-
-    private func playerMiss() {
-        // Prefer beginPointFreeze; kept as safety if ball flies past without cross detect.
-        beginPointFreeze(playerScored: false, atX: bx, y: by, z: 0)
-    }
-
-    private func opponentMiss() {
-        beginPointFreeze(playerScored: true, atX: bx, y: by, z: Config.zFar)
     }
 
     /// Reset position first so a replaced mid-shake action can't leave the court offset.
@@ -700,16 +693,18 @@ final class GameScene: SKScene {
     }
 
     private func levelUp() {
-        level = min(level + 1, Config.maxLevel)
+        // Endless: levels keep counting past Config.maxLevel; only the
+        // difficulty curve clamps there (see Config.difficultyT).
+        level += 1
         opponentLives = Config.opponentLivesPerLevel
-        if Config.extraLifeEveryNLevels > 0, level % Config.extraLifeEveryNLevels == 0 {
-            playerLives += 1
-        }
+        // Earn a spare back for clearing a level — but only up to the cap, so
+        // a clean level grants nothing and the pressure never fully lifts.
+        playerLives = min(playerLives + Config.lifeGainPerLevel, Config.playerLivesMax)
         updateLevelHUD()
         updateLivesHUD()
         Haptics.shared.levelUp()
         flashNode.run(flashAction, withKey: "flash")
-        transitionLabel.text = "LEVEL \(level)/\(Config.maxLevel)"
+        transitionLabel.text = "LEVEL \(level)"
         transitionLabel.isHidden = false
         ballNode.isHidden = true
         transitionCountdown = Config.levelTransitionDuration
@@ -724,17 +719,12 @@ final class GameScene: SKScene {
         scheduleServe()
     }
 
-    private func winRun() {
-        Haptics.shared.levelUp()
-        endRun(won: true)
-    }
-
-    private func endRun(won: Bool) {
+    private func endRun() {
         // Capture before saveHighScoreIfNeeded overwrites highScore.
         let isNewHigh = score > highScore && score > 0
         saveHighScoreIfNeeded()
-        goTitleLabel.text = won ? "YOU WIN" : "GAME OVER"
-        goTitleLabel.fontColor = won ? Config.playerColor : .white
+        goTitleLabel.text = "GAME OVER"
+        goTitleLabel.fontColor = .white
         goScoreLabel.text = "SCORE \(score)"
         goHighLabel.text = isNewHigh
             ? "NEW HIGH SCORE" : "HIGH SCORE \(highScore)"
@@ -774,9 +764,17 @@ final class GameScene: SKScene {
     // MARK: - HUD updates (event-driven; nothing here runs per frame)
 
     private func updateScoreHUD() { hudScoreLabel.text = "\(score)" }
-    private func updateLevelHUD() { hudLevelLabel.text = "LV \(level)/\(Config.maxLevel)" }
+    private func updateLevelHUD() { hudLevelLabel.text = "LV \(level)" }
     private func updateLivesHUD() {
-        hudPlayerLives.text = String(repeating: "◆", count: max(playerLives, 0))
+        // Spares are hearts. At zero spares an empty label would look broken,
+        // so name the state instead — this is the one-more-miss warning.
+        if playerLives <= 0 {
+            hudPlayerLives.text = "LAST LIFE"
+            hudPlayerLives.fontColor = Config.opponentColor
+        } else {
+            hudPlayerLives.text = String(repeating: "◆", count: playerLives)
+            hudPlayerLives.fontColor = Config.playerColor
+        }
         hudOppLives.text = String(repeating: "◆", count: max(opponentLives, 0))
     }
 
@@ -1064,7 +1062,6 @@ final class GameScene: SKScene {
             if awaitingPlayerServe {
                 serveDragPrev = loc
                 serveDragDelta = .zero
-                serveTouchedBall = isOnBall(loc) || paddleOverlapsServeBall()
                 #if targetEnvironment(macCatalyst)
                 // Do not setTouchTarget — that was jumping the paddle to the click.
                 #else
@@ -1092,9 +1089,6 @@ final class GameScene: SKScene {
         if phase == .playing, awaitingPlayerServe {
             if let prev = serveDragPrev {
                 serveDragDelta = CGPoint(x: loc.x - prev.x, y: loc.y - prev.y)
-                if segmentHitsBall(prev, loc) || paddleOverlapsServeBall() {
-                    serveTouchedBall = true
-                }
             }
             serveDragPrev = loc
             #if !targetEnvironment(macCatalyst)

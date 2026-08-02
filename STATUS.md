@@ -1,6 +1,9 @@
 # CyberPong — Status
 
-**Last updated:** 2026-08-01 (Grok) — opponent center reset + chrome/safe-area fix; ready for Claude review.
+**Last updated:** 2026-08-01 (Claude) — audit of Grok's wrap; endless-mode + spare-life rules, Mac resize fix, dead-code purge.
+
+> **"WRAPPED" means feature-complete, not gate-satisfied.** The v2 gate below is
+> still CLOSED. Open v1 work: app icon, theme pass, feel tweaks.
 
 ---
 
@@ -13,7 +16,8 @@
 | Repo | https://github.com/brooksmoore/TunnelPong (private) |
 | Bundle | `com.brooksmoore.tunnelpong` |
 | Platforms | iOS 17+ iPhone · Mac Catalyst desktop |
-| Campaign | 10 levels linear; clear L10 = YOU WIN |
+| Format | **Endless high-score chase — no win state.** Difficulty ramps L1→L10 then holds |
+| Lives | Spare-life model: 3 hearts = 4 misses; +1 per level cleared, capped at 3 |
 
 ---
 
@@ -27,11 +31,26 @@
 
 ---
 
-## Latest fixes (this session tail)
+## Latest fixes
 
-1. **Opponent starts each point at center** — `scheduleServe` snaps `ox,oy = 0`; AI holds center while ball not live (no crawl-back during user serve).  
-2. **Mac top clip** — titlebar treated as min top inset (40pt); taller default window; HUD/title laid out under chrome via `applyChromeLayout()`.  
-3. **iOS notch** — HUD uses real safe-area top/bottom + pad; re-layout after insets settle.
+**Grok (earlier):** opponent snaps to center every point (no crawl-back during your
+serve); Mac titlebar treated as min 40pt top inset; iOS HUD respects real safe area.
+
+**Claude (audit pass):**
+
+1. **Endless mode** — removed the win state. Levels count up forever; difficulty
+   clamps at L10. `LV n` replaces `LV n/10`.
+2. **Spare-life model** — hearts are spares; 0 hearts shows `LAST LIFE` and the
+   next miss ends the run. +1 spare per level cleared, capped at 3.
+   *(Old rules needed a ~95% point-win rate over 30 points to finish — unwinnable.)*
+3. **Mac window resize no longer desyncs the tunnel** — `applyChromeLayout()` now
+   rebuilds ring paths and corner rails from the live court size; previously the
+   ball's walls moved but the drawn wireframe didn't.
+4. **Dead code purged** — `serveTouchedBall` (never read), `segmentHitsBall`,
+   `isOnBall`, `playerMiss`/`opponentMiss` (never called), and the
+   `paddleSmoothing` / `serveBallHitPad` knobs.
+5. **AI leash documented honestly** — `aiLateralFrac*` never binds (verified at all
+   10 levels); `aiSpeedL1/L10` is the real dial. Ceiling kept as a guardrail.
 
 ---
 
