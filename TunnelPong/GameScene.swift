@@ -232,6 +232,24 @@ final class GameScene: SKScene {
 
     /// Re-derive rings, panels, rails, and perspective grid from live court size.
     /// Safe to call before the tunnel exists (arrays are empty).
+    /// Where a corner rail should meet a ring, in screen space.
+    ///
+    /// The ring's *sharp* corner at (±halfW, ±halfH) is not on the drawn path
+    /// any more — the rounded corner cuts across it. Aiming rails there left
+    /// them floating outside the ring. The true meeting point is the 45° point
+    /// on the corner arc, which sits inward from the sharp corner by
+    /// r·(1 − 1/√2) on each axis.
+    private func railAnchor(sx: CGFloat, sy: CGFloat, z: CGFloat) -> CGPoint {
+        let s = proj.scale(z: z)
+        let w = halfW * s
+        let h = halfH * s
+        let r = min(Config.ringCornerFrac * (halfW * 2) * s,
+                    min(w, h) * Config.ringCornerCap)
+        let inset = r * (1 - 1 / sqrt(2))
+        return CGPoint(x: proj.center.x + sx * (w - inset),
+                       y: proj.center.y + sy * (h - inset))
+    }
+
     private func rebuildTunnelGeometry() {
         for (i, node) in rings.enumerated() {
             let t = CourtMath.ringT(index: i, ringCount: Config.ringCount)
@@ -255,8 +273,8 @@ final class GameScene: SKScene {
             for sy: CGFloat in [-1, 1] {
                 guard i < railSegments.count else { break }
                 let path = CGMutablePath()
-                path.move(to: proj.project(x: sx * halfW, y: sy * halfH, z: 0))
-                path.addLine(to: proj.project(x: sx * halfW, y: sy * halfH, z: Config.zFar))
+                path.move(to: railAnchor(sx: sx, sy: sy, z: 0))
+                path.addLine(to: railAnchor(sx: sx, sy: sy, z: Config.zFar))
                 railSegments[i].path = path
                 railSegments[i].strokeColor = Config.wallNeonPink
                 railSegments[i].lineWidth = Config.railLineWidth
@@ -749,7 +767,7 @@ final class GameScene: SKScene {
             #if targetEnvironment(macCatalyst)
             serveHintLabel.display("CLICK TO SERVE")
             #else
-            serveHintLabel.display("LIFT TO SERVE")
+            serveHintLabel.display("SWIPE TO SERVE")
             #endif
             serveReadyShown = nil
             serveHintLabel.isHidden = false
@@ -1411,9 +1429,14 @@ final class GameScene: SKScene {
             }
             serveDragPrev = loc
             #if !targetEnvironment(macCatalyst)
-            // Steering the paddle IS dragging now, so firing mid-drag would
-            // serve the instant the paddle crossed the ball. Serve on lift.
             updateRelativeDrag(to: loc)
+            // Sweep the paddle across the ball to serve — the drag that steers
+            // is the same motion that strikes, so it fires mid-drag rather than
+            // waiting for you to lift.
+            if paddleOverlapsServeBall(),
+               hypot(serveDragDelta.x, serveDragDelta.y) > Config.serveSwipeMin {
+                launchPlayerServe(dragScreen: serveDragDelta)
+            }
             #endif
             return
         }

@@ -91,6 +91,9 @@ struct Config {
     static let playerPaddleHalfW: CGFloat = 72
     static let playerPaddleHalfH: CGFloat = 52
     static let paddleHitSlop: CGFloat = 14
+    /// Minimum thumb travel (screen points, per frame) that counts as a serve
+    /// sweep rather than fine paddle positioning.
+    static let serveSwipeMin: CGFloat = 6
     /// iOS relative-drag amplification. The paddle moves this many times
     /// further than your thumb, so the whole court is reachable one-handed
     /// without stretching. 1.0 would be literal 1:1 dragging.

@@ -596,3 +596,34 @@ iOS device Debug **BUILD SUCCEEDED**, signed, and installed on BCM 16 Pro Max
 via `devicectl`.
 
 ---
+
+## 2026-08-02 — Claude: rail/corner join fix + swipe-to-serve restored
+
+**Actor:** Claude (Opus 5), from Brooks's device screenshot.
+
+### Corner rails floated off the ring corners
+
+Rails were drawn to `(±halfW, ±halfH)` — the ring's *sharp* corner. Once the
+rings took an iPhone-sized corner radius, that point stopped being on the drawn
+path: the arc cuts across it, so the rails ran past the rings into empty space.
+The bigger the radius, the worse the gap — invisible at the old 9pt, obvious at
+~55pt.
+
+New `railAnchor(sx:sy:z:)` returns the 45° point on the corner arc, inset from
+the sharp corner by `r · (1 − 1/√2)` on each axis. Both rail endpoints use it,
+so rails meet the rounded rings at every depth.
+
+### Serve back to swipe
+
+`LIFT TO SERVE` reverted — Brooks preferred sweeping the paddle across the ball.
+Restored the mid-drag strike: while awaiting serve, if the paddle overlaps the
+ball and the thumb has moved more than `Config.serveSwipeMin` (6pt) that frame,
+it launches with the drag's spin. The same motion that steers now strikes, which
+is what made the original feel good. `touchesEnded` still serves as a fallback
+for a slow nudge onto the ball.
+
+### Verified
+
+Device build signed and installed on BCM 16 Pro Max.
+
+---
