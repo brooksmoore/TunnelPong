@@ -15,6 +15,7 @@
 		A20000000000000000000006 /* Nodes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* Nodes.swift */; };
 		A20000000000000000000007 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Haptics.swift */; };
 		B20000000000000000000001 /* CourtMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* CourtMathTests.swift */; };
+		A20000000000000000000008 /* PixelFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* PixelFont.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,6 +39,7 @@
 		A30000000000000000000001 /* TunnelPong.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TunnelPong.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000001 /* CourtMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourtMathTests.swift; sourceTree = "<group>"; };
 		B30000000000000000000001 /* TunnelPongTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TunnelPongTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000008 /* PixelFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelFont.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +78,7 @@
 				A10000000000000000000004 /* Projection.swift */,
 				A10000000000000000000005 /* GameScene.swift */,
 				A10000000000000000000006 /* Nodes.swift */,
+				A10000000000000000000008 /* PixelFont.swift */,
 				A10000000000000000000007 /* Haptics.swift */,
 			);
 			path = TunnelPong;
@@ -201,6 +204,7 @@
 				A20000000000000000000004 /* Projection.swift in Sources */,
 				A20000000000000000000005 /* GameScene.swift in Sources */,
 				A20000000000000000000006 /* Nodes.swift in Sources */,
+				A20000000000000000000008 /* PixelFont.swift in Sources */,
 				A20000000000000000000007 /* Haptics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -144,15 +144,10 @@ struct Config {
     /// Mac Catalyst titlebar eats the top of the content view; treat as min top inset.
     static let macTitlebarInset: CGFloat = 40
 
-    // MARK: - Type (thin, geometric, wide-tracked)
-    // Sleek and symmetrical — the letterforms should feel drawn with a single
-    // hairline. Tracking (see *Tracking below) does most of the work.
-    static let fontTitle = "AvenirNext-UltraLight"
-    static let fontBody  = "Avenir-Light"
-    static let fontHUD   = "Avenir-Light"
-    /// Extra letter-spacing, in points, applied via attributed text.
-    static let titleTracking: CGFloat = 14
-    static let hudTracking: CGFloat = 3.2
+    // MARK: - Type (procedural 5×7 pixel font — see PixelFont.swift)
+    /// Blank columns between glyphs, in blocks. Wider reads more deliberate.
+    static let titleTracking: CGFloat = 2
+    static let hudTracking: CGFloat = 1.6
 
     // MARK: - Retrowave palette
     //
@@ -175,6 +170,46 @@ struct Config {
     static let hudColor      = SKColor(red: 0.86, green: 0.80, blue: 0.96, alpha: 1)
     /// Title accent / hot pink horizon line.
     static let titleAccent   = SKColor(red: 1.00, green: 0.36, blue: 0.55, alpha: 1)
+
+    // MARK: - Tunnel gradient
+    //
+    // The wireframe runs a colour ramp down its length, echoing the reference
+    // sunset: hot pink where the wall is closest, falling through magenta and
+    // violet to deep indigo at the vanishing point. Depth reads as colour, not
+    // just as fade.
+    static let wallNear = SKColor(red: 1.00, green: 0.40, blue: 0.52, alpha: 1)
+    static let wallMid1 = SKColor(red: 0.91, green: 0.26, blue: 0.55, alpha: 1)
+    static let wallMid2 = SKColor(red: 0.58, green: 0.22, blue: 0.72, alpha: 1)
+    static let wallMid3 = SKColor(red: 0.34, green: 0.16, blue: 0.62, alpha: 1)
+    static let wallFar  = SKColor(red: 0.16, green: 0.09, blue: 0.38, alpha: 1)
+
+    /// Colour of the tunnel wall at depth `t` (0 = near plane, 1 = far).
+    static func wallColor(_ t: CGFloat) -> SKColor {
+        let stops = [wallNear, wallMid1, wallMid2, wallMid3, wallFar]
+        let clamped = max(0, min(1, t))
+        let scaled = clamped * CGFloat(stops.count - 1)
+        let i = min(Int(scaled), stops.count - 2)
+        return blend(stops[i], stops[i + 1], scaled - CGFloat(i))
+    }
+
+    static func blend(_ a: SKColor, _ b: SKColor, _ t: CGFloat) -> SKColor {
+        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+        var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+        a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
+        b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+        return SKColor(red: ar + (br - ar) * t, green: ag + (bg - ag) * t,
+                       blue: ab + (bb - ab) * t, alpha: aa + (ba - aa) * t)
+    }
+
+    // MARK: - CRT scanlines
+    /// Horizontal line overlay. Subtle texture, not a gimmick — keep it low.
+    static let scanlineAlpha: CGFloat = 0.16
+    /// Points between lines (line is 1pt of that span).
+    static let scanlineSpacing: CGFloat = 3
+
+    // MARK: - Ball spin
+    /// Radians of roll per point of lateral travel, scaled. Higher = spinnier.
+    static let ballSpinFactor: CGFloat = 0.85
 
     // MARK: - Starfield
     //

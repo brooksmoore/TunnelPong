@@ -75,31 +75,37 @@ final class GameScene: SKScene {
     private var backdropSize: CGSize = .zero
     private let worldNode = SKNode()
     private var rings: [SKShapeNode] = []
-    private var cornerLines: [SKShapeNode] = []
+    private var railSegments: [SKShapeNode] = []
     private var ringPulses: [SKAction] = []
     private var pauseDim: SKSpriteNode!
+    private var scanlineNode: SKSpriteNode!
     private var ballNode: SKNode!
+    /// Inner layer of the ball that turns; see NodeFactory.ball().
+    private weak var ballSpinLayer: SKNode?
+    private var ballSpin: CGFloat = 0
+    /// Cached so the serve affordance isn't re-applied every frame.
+    private var serveReadyShown: Bool?
     private var playerPaddleNode: SKShapeNode!
     private var oppPaddleNode: SKShapeNode!
 
     private var hudNode: SKNode!
-    private var hudLevelLabel: NeonLabel!
-    private var hudScoreLabel: NeonLabel!
-    private var hudPlayerLives: NeonLabel!
-    private var hudOppLives: NeonLabel!
-    private var pauseButton: NeonLabel!
-    private var serveHintLabel: NeonLabel!
-    private var pointCalloutLabel: NeonLabel!
+    private var hudLevelLabel: PixelLabel!
+    private var hudScoreLabel: PixelLabel!
+    private var hudPlayerLives: PixelLabel!
+    private var hudOppLives: PixelLabel!
+    private var pauseButton: PixelLabel!
+    private var serveHintLabel: PixelLabel!
+    private var pointCalloutLabel: PixelLabel!
 
     private var titleLayer: SKNode!
-    private var titleHighLabel: NeonLabel!
+    private var titleHighLabel: PixelLabel!
     private var pauseLayer: SKNode!
-    private var quitLabel: NeonLabel!
+    private var quitLabel: PixelLabel!
     private var gameOverLayer: SKNode!
-    private var goTitleLabel: NeonLabel!
-    private var goScoreLabel: NeonLabel!
-    private var goHighLabel: NeonLabel!
-    private var transitionLabel: NeonLabel!
+    private var goTitleLabel: PixelLabel!
+    private var goScoreLabel: PixelLabel!
+    private var goHighLabel: PixelLabel!
+    private var transitionLabel: PixelLabel!
     private var flashNode: SKSpriteNode!
 
     private var shakeAction: SKAction!
@@ -175,6 +181,17 @@ final class GameScene: SKScene {
         stars.size = size
         stars.position = CGPoint(x: size.width / 2, y: size.height / 2)
         backdropNode.addChild(stars)
+
+        // CRT lines ride above the play field but under the HUD, so the game
+        // looks like it's on a tube while the readouts stay crisp.
+        if scanlineNode == nil {
+            scanlineNode = SKSpriteNode()
+            scanlineNode.zPosition = 70
+            addChild(scanlineNode)
+        }
+        scanlineNode.texture = NodeFactory.scanlineTexture(size: size)
+        scanlineNode.size = size
+        scanlineNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
     }
 
     /// Re-derive every ring path and corner rail from the current court size.
@@ -192,12 +209,18 @@ final class GameScene: SKScene {
         var i = 0
         for sx: CGFloat in [-1, 1] {
             for sy: CGFloat in [-1, 1] {
-                guard i < cornerLines.count else { return }
-                let path = CGMutablePath()
-                path.move(to: proj.project(x: sx * halfW, y: sy * halfH, z: 0))
-                path.addLine(to: proj.project(x: sx * halfW, y: sy * halfH, z: Config.zFar))
-                cornerLines[i].path = path
-                i += 1
+                for s in 0..<(Config.ringCount - 1) {
+                    guard i < railSegments.count else { return }
+                    let t0 = CourtMath.ringT(index: s, ringCount: Config.ringCount)
+                    let t1 = CourtMath.ringT(index: s + 1, ringCount: Config.ringCount)
+                    let path = CGMutablePath()
+                    path.move(to: proj.project(x: sx * halfW, y: sy * halfH,
+                                               z: Config.zFar * t0))
+                    path.addLine(to: proj.project(x: sx * halfW, y: sy * halfH,
+                                                  z: Config.zFar * t1))
+                    railSegments[i].path = path
+                    i += 1
+                }
             }
         }
     }
@@ -269,15 +292,16 @@ final class GameScene: SKScene {
             down.timingMode = .easeOut
             ringPulses.append(SKAction.sequence([up, down]))
         }
-        // Corner rails from near plane to far plane.
-        for sx: CGFloat in [-1, 1] {
-            for sy: CGFloat in [-1, 1] {
-                let p0 = proj.project(x: sx * halfW, y: sy * halfH, z: 0)
-                let p1 = proj.project(x: sx * halfW, y: sy * halfH, z: Config.zFar)
-                let line = NodeFactory.cornerLine(from: p0, to: p1)
-                line.zPosition = 2
-                worldNode.addChild(line)
-                cornerLines.append(line)
+        // Corner rails, cut into one span per ring gap so each span can carry
+        // its own colour off the wall ramp — that's the gradient down the rail.
+        for _ in 0..<4 {
+            for s in 0..<(Config.ringCount - 1) {
+                let t = (CourtMath.ringT(index: s, ringCount: Config.ringCount)
+                       + CourtMath.ringT(index: s + 1, ringCount: Config.ringCount)) / 2
+                let seg = NodeFactory.railSegment(t: t)
+                seg.zPosition = 2
+                worldNode.addChild(seg)
+                railSegments.append(seg)
             }
         }
     }
@@ -293,6 +317,7 @@ final class GameScene: SKScene {
         ballNode = NodeFactory.ball()
         ballNode.zPosition = 20
         worldNode.addChild(ballNode)
+        ballSpinLayer = ballNode.childNode(withName: "//" + NodeFactory.ballSpinLayerName)
 
         playerPaddleNode = NodeFactory.paddle(halfW: Config.playerPaddleHalfW,
                                               halfH: Config.playerPaddleHalfH,
@@ -331,11 +356,11 @@ final class GameScene: SKScene {
 
         // Positions set by layoutHUD() via applyChromeLayout() (safe-area aware).
         hudPlayerLives = NodeFactory.hudLabel("", size: 15, color: Config.playerColor, alpha: 0.7)
-        hudPlayerLives.horizontalAlignmentMode = .left
+        hudPlayerLives.hAlign = .left
         hudNode.addChild(hudPlayerLives)
 
         hudOppLives = NodeFactory.hudLabel("", size: 13, color: Config.opponentColor, alpha: 0.7)
-        hudOppLives.horizontalAlignmentMode = .right
+        hudOppLives.hAlign = .right
         hudNode.addChild(hudOppLives)
 
         hudLevelLabel = NodeFactory.hudLabel("LV 1", size: 15, color: Config.hudColor, alpha: 0.65)
@@ -418,7 +443,7 @@ final class GameScene: SKScene {
         addChild(transitionLabel)
     }
 
-    private func place(_ node: NeonLabel, _ x: CGFloat, _ y: CGFloat) -> NeonLabel {
+    private func place(_ node: PixelLabel, _ x: CGFloat, _ y: CGFloat) -> PixelLabel {
         node.position = CGPoint(x: x, y: y)
         return node
     }
@@ -562,11 +587,15 @@ final class GameScene: SKScene {
             bx = 0; by = 0
             bz = Config.playerServeZ
             awaitingPlayerServe = true
+            // Short copy only — the old sentence ran off both edges of the
+            // window. The "cover the ball first" half is taught by the
+            // affordance in update(), not by more text.
             #if targetEnvironment(macCatalyst)
-            serveHintLabel.display("MOVE PADDLE ONTO BALL · CLICK TO SERVE")
+            serveHintLabel.display("CLICK TO SERVE")
             #else
-            serveHintLabel.display("MOVE PADDLE ONTO BALL · SWIPE TO SERVE")
+            serveHintLabel.display("SWIPE TO SERVE")
             #endif
+            serveReadyShown = nil
             serveHintLabel.isHidden = false
         }
         renderWorld()
@@ -816,6 +845,14 @@ final class GameScene: SKScene {
             // Serve ball stays fixed at court center until struck (not glued to paddle).
             if awaitingPlayerServe {
                 bx = 0; by = 0; bz = Config.playerServeZ
+                // Light the prompt only once the paddle actually covers the
+                // ball, so the requirement is shown rather than spelled out.
+                let ready = paddleOverlapsServeBall()
+                if serveReadyShown != ready {
+                    serveReadyShown = ready
+                    serveHintLabel.tint = ready ? Config.playerColor : Config.hudColor
+                    serveHintLabel.alpha = ready ? 1.0 : 0.45
+                }
             }
             renderWorld()
         case .levelTransition:
@@ -882,6 +919,11 @@ final class GameScene: SKScene {
         bx += vx * dt
         by += vy * dt
         bz += vz * dt
+
+        // Roll: a ball travelling sideways turns about the view axis. Driving
+        // this off vx alone (rather than total speed) means a straight shot
+        // down the tunnel barely spins, while a cut shot visibly tumbles.
+        ballSpin -= (vx / max(Config.ballRadius, 1)) * dt * Config.ballSpinFactor
 
         // Wall bounces: positional reflection keeps the ball inside the court
         // even on a long frame.
@@ -1045,6 +1087,7 @@ final class GameScene: SKScene {
         ballNode.position = proj.project(x: bx, y: by, z: bz)
         // Perspective scale + slight draw boost so near/far size delta is readable.
         ballNode.setScale(proj.scale(z: bz) * Config.ballDrawScale)
+        ballSpinLayer?.zRotation = ballSpin
     }
 
     // MARK: - Touch handling
@@ -1063,13 +1106,13 @@ final class GameScene: SKScene {
             guard CACurrentMediaTime() - lastPhaseChange > 0.45 else { return }
             startRun()
         case .paused:
-            if quitLabel.frame.insetBy(dx: -40, dy: -30).contains(loc) {
+            if quitLabel.calculateAccumulatedFrame().insetBy(dx: -40, dy: -30).contains(loc) {
                 quitToTitle()
             } else {
                 resumeGame()
             }
         case .playing:
-            if pauseButton.frame.insetBy(dx: -18, dy: -18).contains(loc) {
+            if pauseButton.calculateAccumulatedFrame().insetBy(dx: -18, dy: -18).contains(loc) {
                 pauseGame()
                 return
             }

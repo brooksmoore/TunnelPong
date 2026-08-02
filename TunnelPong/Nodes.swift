@@ -1,58 +1,6 @@
 import SpriteKit
 import UIKit
 
-/// A label that draws with wide letter-tracking. SKLabelNode has no tracking of
-/// its own, so text is rendered through an attributed string and re-rendered
-/// whenever the text or tint changes — always set copy via `display(_:)`.
-final class NeonLabel: SKLabelNode {
-
-    private var raw = ""
-    private var styleFont = Config.fontHUD
-    private var styleSize: CGFloat = 14
-    private var tracking: CGFloat = 0
-
-    /// Text colour. (Assigning `fontColor` directly would be ignored while
-    /// attributedText is in use, so route colour through here.)
-    var tint: SKColor = .white {
-        didSet { restyle() }
-    }
-
-    static func make(_ text: String, size: CGFloat, color: SKColor,
-                     font: String, tracking: CGFloat) -> NeonLabel {
-        let l = NeonLabel(fontNamed: font)
-        l.styleFont = font
-        l.styleSize = size
-        l.tracking = tracking
-        l.raw = text
-        l.tint = color            // triggers restyle()
-        l.verticalAlignmentMode = .center
-        return l
-    }
-
-    func display(_ text: String) {
-        guard text != raw else { return }
-        raw = text
-        restyle()
-    }
-
-    private func restyle() {
-        let font = UIFont(name: styleFont, size: styleSize)
-            ?? UIFont.systemFont(ofSize: styleSize, weight: .ultraLight)
-        var attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: tint,
-        ]
-        if tracking != 0 { attrs[.kern] = tracking }
-        let s = NSMutableAttributedString(string: raw, attributes: attrs)
-        // kern also pads after the final glyph, which would throw centred text
-        // off by half a track — strip it from the last character.
-        if tracking != 0, raw.count > 0 {
-            s.removeAttribute(.kern, range: NSRange(location: raw.count - 1, length: 1))
-        }
-        attributedText = s
-    }
-}
-
 /// Builders for every procedural visual. No image assets anywhere — the sky and
 /// the moon are drawn into textures at runtime.
 enum NodeFactory {
@@ -96,8 +44,9 @@ enum NodeFactory {
 
     // MARK: - Tunnel
 
-    /// One tunnel ring: a stroked rounded rect at a given projected scale.
-    /// `t` is 0 at the near plane, 1 at the far plane; it drives the fade.
+    /// One tunnel ring: a stroked rect at a given projected scale. `t` is 0 at
+    /// the near plane, 1 at the far plane, and drives both the fade and the
+    /// position along the wall's colour ramp.
     static func ring(halfW: CGFloat, halfH: CGFloat, scale: CGFloat,
                      t: CGFloat, center: CGPoint) -> SKShapeNode {
         let w = halfW * scale
@@ -106,26 +55,38 @@ enum NodeFactory {
         let node = SKShapeNode(rect: rect, cornerRadius: Config.ringCornerRadius * scale)
         node.position = center
         node.fillColor = .clear
-        node.strokeColor = Config.ringColor
+        node.strokeColor = Config.wallColor(t)
         node.lineWidth = lerp(Config.ringLineWidthNear, Config.ringLineWidthFar, t)
         node.alpha = lerp(Config.ringAlphaNear, Config.ringAlphaFar, t)
         node.isAntialiased = true
         return node
     }
 
-    /// A faint straight line joining a court corner at z = 0 to the same
-    /// corner at z = zFar. Because projection is a straight ray toward the
-    /// vanishing point, this line passes through every ring's corner.
-    static func cornerLine(from p0: CGPoint, to p1: CGPoint) -> SKShapeNode {
-        let path = CGMutablePath()
-        path.move(to: p0)
-        path.addLine(to: p1)
-        let node = SKShapeNode(path: path)
-        node.strokeColor = Config.ringColor
-        node.alpha = Config.cornerLineAlpha
-        node.lineWidth = 1
+    /// One span of a corner rail. Rails are cut into per-ring segments so each
+    /// can take its own colour — that's what makes the rail read as a gradient
+    /// rather than a flat line (SKShapeNode strokes are a single colour).
+    static func railSegment(t: CGFloat) -> SKShapeNode {
+        let node = SKShapeNode()
+        node.strokeColor = Config.wallColor(t)
+        node.alpha = Config.cornerLineAlpha * (1 - t * 0.45)
+        node.lineWidth = lerp(1.4, 0.6, t)
         node.isAntialiased = true
         return node
+    }
+
+    /// Horizontal CRT lines, baked once into a texture.
+    static func scanlineTexture(size: CGSize) -> SKTexture {
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { ctx in
+            let cg = ctx.cgContext
+            cg.setFillColor(SKColor.black.withAlphaComponent(Config.scanlineAlpha).cgColor)
+            var y: CGFloat = 0
+            while y < size.height {
+                cg.fill(CGRect(x: 0, y: y, width: size.width, height: 1))
+                y += Config.scanlineSpacing
+            }
+        }
+        return SKTexture(image: image)
     }
 
     // MARK: - Actors
@@ -160,7 +121,11 @@ enum NodeFactory {
         return node
     }
 
-    /// Neon orange sphere: warm halo, body, and a hot core.
+    static let ballSpinLayerName = "spin"
+
+    /// Neon orange sphere. The halo and specular stay fixed to the screen while
+    /// a marked inner layer rotates inside them — a still highlight over turning
+    /// surface detail is what sells roll, and it costs one node rotation.
     static func ball() -> SKNode {
         let root = SKNode()
         let r = Config.ballRadius
@@ -180,11 +145,39 @@ enum NodeFactory {
         body.zPosition = 1
         root.addChild(body)
 
-        let core = SKShapeNode(circleOfRadius: r * 0.42)
-        core.fillColor = Config.ballCoreColor
+        // Rotating surface, clipped to the ball so marks disappear round the
+        // limb instead of sliding off the edge.
+        let crop = SKCropNode()
+        crop.zPosition = 2
+        let mask = SKShapeNode(circleOfRadius: r)
+        mask.fillColor = .white
+        mask.strokeColor = .clear
+        crop.maskNode = mask
+
+        let spin = SKNode()
+        spin.name = ballSpinLayerName
+        // Two dark bands and a couple of speckles: enough asymmetry to see the
+        // rotation without turning the ball into a beach ball.
+        for (dx, dy, rad, alpha) in [(-0.34, 0.10, 0.30, 0.30),
+                                     (0.28, -0.30, 0.38, 0.26),
+                                     (0.10, 0.42, 0.16, 0.22),
+                                     (-0.12, -0.48, 0.13, 0.18)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
+            let mark = SKShapeNode(circleOfRadius: r * rad)
+            mark.fillColor = SKColor.black.withAlphaComponent(alpha)
+            mark.strokeColor = .clear
+            mark.position = CGPoint(x: r * dx, y: r * dy)
+            spin.addChild(mark)
+        }
+        crop.addChild(spin)
+        root.addChild(crop)
+
+        // Specular sits above the rotating surface and never moves — light
+        // source stays put while the ball turns under it.
+        let core = SKShapeNode(circleOfRadius: r * 0.34)
+        core.fillColor = Config.ballCoreColor.withAlphaComponent(0.92)
         core.strokeColor = .clear
-        core.position = CGPoint(x: -r * 0.16, y: r * 0.18)
-        core.zPosition = 2
+        core.position = CGPoint(x: -r * 0.24, y: r * 0.26)
+        core.zPosition = 3
         root.addChild(core)
 
         return root
@@ -192,24 +185,23 @@ enum NodeFactory {
 
     // MARK: - Type
 
+    /// `size` is cap height in points, so call sites keep thinking in points
+    /// even though the glyphs are built from blocks.
     static func label(_ text: String, size: CGFloat, color: SKColor,
                       alpha: CGFloat = 1,
-                      font: String = Config.fontBody,
-                      tracking: CGFloat = Config.hudTracking) -> NeonLabel {
-        let l = NeonLabel.make(text, size: size, color: color,
-                               font: font, tracking: tracking)
+                      tracking: CGFloat = Config.hudTracking) -> PixelLabel {
+        let l = PixelLabel.make(text, height: size, color: color, tracking: tracking)
         l.alpha = alpha
         return l
     }
 
-    static func titleLabel(_ text: String, size: CGFloat, color: SKColor) -> NeonLabel {
-        label(text, size: size, color: color,
-              font: Config.fontTitle, tracking: Config.titleTracking)
+    static func titleLabel(_ text: String, size: CGFloat, color: SKColor) -> PixelLabel {
+        label(text, size: size, color: color, tracking: Config.titleTracking)
     }
 
     static func hudLabel(_ text: String, size: CGFloat, color: SKColor,
-                         alpha: CGFloat = 1) -> NeonLabel {
+                         alpha: CGFloat = 1) -> PixelLabel {
         label(text, size: size, color: color, alpha: alpha,
-              font: Config.fontHUD, tracking: Config.hudTracking)
+              tracking: Config.hudTracking)
     }
 }
