@@ -84,8 +84,6 @@ struct Config {
     /// Far *wire* rings stay open; the opponent-plane ring is a soft pink wall.
     static let ringAlphaFar: CGFloat = 0.42
     static let cornerLineAlpha: CGFloat = 0.90
-    /// Always draw the far-plane ring so corner rails meet a real end frame.
-    static let ringSkipFarPlane = false
     /// Soft pink fill on the far (opponent) plane — marks the end of the tunnel.
     static let farWallFillAlpha: CGFloat = 0.14
     /// Outline must *look* as thin as the second-to-last wire ring. Fill + stroke
@@ -175,15 +173,10 @@ struct Config {
     // Absolute veer grows with ball speed via eng * speed, so late game
     // feels wilder without gating skill behind the level curve.
     static let englishStrength: CGFloat = 0.88
-    /// Legacy aliases (unused for ramping; kept so old notes still map).
-    static let englishL1: CGFloat = englishStrength
-    static let englishL10: CGFloat = englishStrength
     // Serve drag spin magnitude (screen-space → world spin before renorm).
     // Full power from round 1; renorm keeps total speed, so faster balls
     // keep a bigger absolute lateral share after the same drag.
     static let serveDragSpin: CGFloat = 880
-    static let serveDragL1: CGFloat = serveDragSpin
-    static let serveDragL10: CGFloat = serveDragSpin
 
     // AI: pure ball tracking. Difficulty = linear tracking speed only.
     //   L1  — slow enough that casual angles score freely
@@ -221,8 +214,6 @@ struct Config {
     static let hudBottomPad: CGFloat = 10
     /// Mac Catalyst titlebar eats the top of the content view; treat as min top inset.
     static let macTitlebarInset: CGFloat = 40
-    /// Vertical gap between LV and score.
-    static let hudScoreGap: CGFloat = 20
     /// Legacy alias — HUD now keys off heartsInsetFromNearRing.
     static let hudTopGap: CGFloat = 22
 
@@ -271,24 +262,10 @@ struct Config {
     static let sky6 = SKColor(red: 0.12, green: 0.03, blue: 0.22, alpha: 1)  // mid purple
     static let sky7 = SKColor(red: 0.15, green: 0.04, blue: 0.26, alpha: 1)  // violet (no pink)
     static let sky8 = SKColor(red: 0.18, green: 0.05, blue: 0.28, alpha: 1)  // soft purple base
-    static let groundColor = SKColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)
     static let moonColor = SKColor(red: 0.96, green: 0.96, blue: 1.00, alpha: 1)
-    static let ridgeColor = SKColor(red: 1.00, green: 0.35, blue: 0.55, alpha: 1)
-    static let streakColor = SKColor(red: 1.00, green: 0.40, blue: 0.62, alpha: 1)
 
     // MARK: - Tunnel wire — one neon pink for every spaced line
     static let wallNeonPink = SKColor(red: 1.00, green: 0.28, blue: 0.58, alpha: 1)
-    static let wallNear = wallNeonPink
-    static let wallMid1 = wallNeonPink
-    static let wallMid2 = wallNeonPink
-    static let wallMid3 = wallNeonPink
-    static let wallFar  = wallNeonPink
-
-    /// Every tunnel stroke is the same neon pink (depth is spacing, not colour).
-    static func wallColor(_ t: CGFloat) -> SKColor {
-        _ = t
-        return wallNeonPink
-    }
 
     /// Soft blend only for baked sky bands (still quantized by band height).
     static func blend(_ a: SKColor, _ b: SKColor, _ t: CGFloat) -> SKColor {
@@ -318,18 +295,12 @@ struct Config {
     // MARK: - Depth atmosphere (simplified)
     /// Mild edge darken only — sky already carries most of the mood.
     static let vignetteAlpha: CGFloat = 0.22
-    /// Walls stay transparent — no filled panels.
-    static let panelAlphaNear: CGFloat = 0
-    static let panelAlphaFar: CGFloat = 0
     /// Extra face grid off — rings + corner rails are the continuous lattice.
     static let gridDepthLines = 0
     static let gridLongLines = 0
     static let gridAlphaNear: CGFloat = 0.55
     static let gridAlphaFar: CGFloat = 0.35
     static let gridLineWidthNear: CGFloat = 2
-    static let gridLineWidthFar: CGFloat = 2
-    /// Dust / vanishing glow removed — they read as noise vs the clean r1 look.
-    static let dustCount = 0
 
     // MARK: - Audio (procedural, zero assets)
     static let audioMaster: Float = 0.55
@@ -348,8 +319,6 @@ struct Config {
 
     // MARK: - Paddle (solid slabs, lightly rounded)
     static let paddleCornerRadius: CGFloat = 10
-    /// Impact flash is a second solid border + brief fill brighten.
-    static let paddleGlowWidth: CGFloat = 0
     static let paddleGlowLineWidth: CGFloat = 4
     static let paddleGlowUp: CGFloat = 0.035
     static let paddleGlowDown: CGFloat = 0.16

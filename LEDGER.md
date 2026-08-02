@@ -681,3 +681,57 @@ Mac Catalyst rebuild + launch; unit tests on iPhone 17 sim (see session log).
 Verified: `bin/play-mac.sh` rebuild.
 
 ---
+
+## 2026-08-02 — Claude audit of Grok's tweaks pass
+
+**Actor:** Claude (Opus 5). Grok's pass committed as-is first (`10e3a58`).
+
+### Verdict
+
+Grok's changes hold up. The AI is now genuinely pure tracking — `stepAI` chases
+clamped live `(bx, by)` with no intercept solve and no `reflect` fold, which is
+what Brooks asked for. Serve-swipe uses cumulative path length plus net
+displacement (better than the per-frame delta it replaced). The ambient audio
+fix is the right shape: attach once, stop/play thereafter.
+
+Confirmed all six earlier Claude fixes survived the pass: `railAnchor`,
+hoisted `trailAlphaSteps`, safe-band court geometry, audio tone cache, audio
+player pool, elastic trackpad.
+
+### Fixed: dead knobs in the tuning surface
+
+`Config.swift` is contracted to be the one place anyone tunes, so an entry that
+does nothing is a trap. Removed 18 that no code reads:
+
+- **`englishL1` / `englishL10` / `serveDragL1` / `serveDragL10`** — the dangerous
+  ones. Grok flattened english and serve-drag to full-strength-from-L1 and left
+  these as aliases pointing at the flat value. Nothing reads them, so editing
+  `englishL10` to change late-game spin would have silently done nothing. Same
+  class of trap as the `aiLateralFrac` finding on 2026-08-01.
+- `wallColor()` + `wallNear/Mid1/Mid2/Mid3/Far` — superseded by the single
+  `wallNeonPink`; all five aliased to it and were unreferenced.
+- `paddleGlowWidth`, `hudScoreGap`, `ringSkipFarPlane`, `panelAlphaNear/Far`,
+  `gridLineWidthFar`, `groundColor`, `ridgeColor`, `streakColor`, `dustCount` —
+  orphans from removed visual features.
+
+`Config.blend` was checked and **kept**: still used by the ring hit flash.
+
+### Noted, not changed
+
+`CourtMath.reflect` is no longer called by app code — the new pure-tracking AI
+was its only consumer. Left in place: it is pure, documented, covered by five
+passing tests, and the AI model has changed twice this week. Flagging rather
+than deleting so the choice is visible.
+
+### Verified
+
+- iOS device Debug **BUILD SUCCEEDED**, zero compiler warnings, signed and
+  installed on BCM 16 Pro Max.
+- No `print`/TODO/FIXME left in app code; no `try!` or `as!` force-casts.
+- App icon + asset catalog intact.
+- pbxproj checked properly: 47 distinct UUIDs, **every ID maps to exactly one
+  entity** (no repeat of the Assets/Audio collision).
+- Unit tests not re-run (no simulator by request; test target's macOS
+  deployment target still exceeds this Mac's).
+
+---
