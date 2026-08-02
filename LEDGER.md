@@ -627,3 +627,57 @@ for a slow nudge onto the ball.
 Device build signed and installed on BCM 16 Pro Max.
 
 ---
+
+## 2026-08-02 — Grok: 10/10 polish (pure-XY AI + audit cleanup)
+
+**Actor:** Grok (xAI), after Brooks's audit of Claude's night work + report that
+the opponent felt like it predicted where the ball would land.
+
+### Root cause (AI felt psychic)
+
+`stepAI` was **not** pure tracking. On outbound balls (`vz > 0`) it computed:
+
+```
+tHit = (zFar - bz) / vz
+tx, ty = CourtMath.reflect(bx + vx*tHit, …)  // exact far-plane intercept
+```
+
+That is classic intercept aim with wall-bounce folding — the paddle pre-moves
+to the arrival point, so speed only needs to cover remaining distance before
+impact. Brooks's intended design: chase **live** `(bx, by)` and get faster.
+
+### Fixes
+
+| Item | Change |
+|------|--------|
+| AI | Always chase clamped current ball XY. No intercept, no `reflect` aim. |
+| Serve swipe | Cumulative path length + net displacement; threshold 14pt (was per-frame 6). Spin from full gesture. |
+| Ambient audio | Attach ambient player once; stop/play only (same class as SFX pool fix). |
+| Docs | STATUS / MEMORY / README brought current (icon done, audio in-scope, AI lock). |
+
+### Not changed
+
+- Difficulty numbers (`aiSpeedL1/L10` etc.) — retune after play if pure tracking
+  makes mid/late too easy.
+- v2 gate still CLOSED.
+- No multiplayer.
+
+### Verified
+
+Mac Catalyst rebuild + launch; unit tests on iPhone 17 sim (see session log).
+
+---
+
+## 2026-08-02 — Mac swipe-serve, more spin, stepped ring weights
+
+**Actor:** Grok, at Brooks's request while playing on Catalyst.
+
+| Change | Detail |
+|--------|--------|
+| Mac serve | Same as iOS: click-**drag** across ball (`serveSwipeMin` travel). Pure click no longer serves. Hint: `SWIPE TO SERVE`. During serve swipe, drag steers paddle; hover still aims when not clicked. |
+| Spin | english 0.48→0.78, serveDrag 420→720, cornerBoost 0.72, minVz 0.42, ballSpinFactor 1.25 |
+| Ring strokes | Near 3 rings **3pt**, mid 3 **2pt**, far 3 **1pt** (`Config.ringLineWidth(index:)`). Z rails stay **1pt**. |
+
+Verified: `bin/play-mac.sh` rebuild.
+
+---

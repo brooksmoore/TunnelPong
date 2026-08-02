@@ -1,9 +1,9 @@
 # CyberPong — Status
 
-**Last updated:** 2026-08-02 (Grok) — polish + Claude catch-up docs.
+**Last updated:** 2026-08-02 (Grok) — 10/10 polish pass: pure-XY AI, serve gesture, ambient audio, docs.
 
 > **"WRAPPED" means feature-complete, not gate-satisfied.** The v2 gate below is
-> still CLOSED. Open v1 work: app icon, multi-session device play, Config freeze.
+> still CLOSED. Open v1 work: multi-session device play, Config freeze, cold second person.
 
 ---
 
@@ -20,6 +20,7 @@
 | Lives | Spare lives: 3 hearts = 4 misses; +1 per level clear, cap 3 |
 | Look | Night gradient sky + stars + moon · neon-pink tunnel wire · chrome titles · pixel actors |
 | Audio | Procedural retrowave (`Audio.swift`) — ambient pad + SFX, zero asset files |
+| Icon | Procedural `bin/make-icon.swift` → Assets.xcassets |
 
 ---
 
@@ -28,36 +29,37 @@
 | Surface | State |
 |---------|--------|
 | Mac Catalyst | `bin/play-mac.sh` |
-| Physical iPhone | Proven earlier (BCM 16 Pro Max) |
-| Simulator | Works; prefer device/Catalyst for feel |
+| Physical iPhone | Proven (BCM 16 Pro Max) |
+| Simulator | Available (iOS 26.1); prefer device/Catalyst for feel |
 
 ---
 
-## What Grok shipped since Claude’s theme stack (read this)
+## AI model (locked 2026-08-02)
 
-### Rules / feel
-- Endless + spare lives (Claude) kept.
-- **AI = pure tracking only** — no aim error, no reaction delay, no idle dodge.
-- Difficulty: **linear** `aiSpeedL1→L10` (~48→245). Safety ceiling `aiLateralFrac*` only.
-- Spin/english turned up; `minVzFraction` 0.48 so lateral spin reads.
-- **No full-screen flash** on points or level-ups (haptics + SFX only).
-- Hearts update immediately on score/miss; no POINT/MISS text.
+- **Pure live ball XY tracking only.** Chase `bx, by` every frame.
+- **No** far-plane intercept prediction, **no** wall-bounce fold, **no** aim error, **no** reaction delay.
+- Difficulty dial: **linear** `aiSpeedL1 → aiSpeedL10` only.
+- `aiLateralFrac*` = safety ceiling only (not a skill dial).
 
-### Visual
-- c3-inspired night sky (black/purple dominate; thin pink low) + **consistent** 1px stars full frame + moon.
-- **No** vanishing glow, dust, or live twinkle nodes (those were the “pink blink”).
-- Tunnel: transparent walls, **2pt** neon-pink rings + 4 continuous corner rails, far ring **present** so rails meet a frame (capped corner radius so it doesn’t read as a disc).
-- Title chrome: **3-band** bright pink → magenta → dark purple + soft purple rim (r1 energy, easier palette).
-- Player cyan paddle/hearts; opponent magenta; wall-hit ring colour flash kept.
+---
 
-### Audio (`Audio.swift`)
-- Soft ambient pad on title/play.
-- Player paddle = high **tick**; opponent = low **tok**.
-- Wall, point, miss, level-up, serve, UI tap.
-- Volume: `Config.audioMaster` / `audioSFX` / `audioAmbient`.
+## What shipped recently
 
-### Still open for v1
-App icon · Config freeze after play · cold second-person · multi-session device play.
+### Feel / correctness
+- AI intercept prediction removed (was psychic pre-positioning).
+- Serve swipe threshold = **cumulative** travel (`serveSwipeMin` 14pt), not per-frame.
+- Elastic thumb trackpad (iOS) + swipe-to-serve; Mac hover absolute.
+- Court fitted to safe vertical band (Dynamic Island clearance).
+- Corner rails meet rounded rings at 45° arc anchors.
+
+### Polish / efficiency
+- App icon wired.
+- SFX: cached buffers + 12-node player pool.
+- Ambient: attach once; stop/play only.
+- Trail alphas hoisted out of frame loop.
+
+### Still open for v1 (human gate)
+Multi-session device play · Config freeze · cold second-person · (App Store only: PrivacyInfo).
 
 ---
 

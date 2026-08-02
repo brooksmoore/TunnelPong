@@ -109,6 +109,24 @@ final class PixelLabel: SKNode {
         }
     }
 
+    /// Switch plain ↔ chrome (e.g. score beats high score mid-run).
+    func setStyle(_ newStyle: Style) {
+        guard newStyle != style else { return }
+        style = newStyle
+        removeAllChildren()
+        if style == .chrome {
+            addChild(glowShape)
+            addChild(outlineShape)
+            addChild(fillTop)
+            addChild(fillMid)
+            addChild(fillBot)
+        } else {
+            if wantsShadow { addChild(shadowShape) }
+            addChild(shape)
+        }
+        rebuild()
+    }
+
     static func make(_ text: String, height: CGFloat, color: SKColor,
                      tracking: CGFloat = 1, align: HAlign = .center,
                      shadow: Bool = false, style: Style = .plain) -> PixelLabel {

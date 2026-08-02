@@ -42,10 +42,10 @@ enum NodeFactory {
             Config.sky0, Config.sky1, Config.sky2, Config.sky3, Config.sky4,
             Config.sky5, Config.sky6, Config.sky7, Config.sky8,
         ]
-        // Black/purple dominate; any pink only in the last ~8% of the frame.
-        // t = 0 is top of frame (UIKit y-down).
+        // Darker sky: black through most of the frame; soft purple only near the
+        // bottom (gradient "moved up" — no pink horizon). t = 0 is top (UIKit y-down).
         let skyLocs: [CGFloat] = [
-            0.00, 0.22, 0.38, 0.50, 0.62, 0.72, 0.82, 0.90, 0.96,
+            0.00, 0.28, 0.48, 0.62, 0.74, 0.84, 0.90, 0.95, 1.00,
         ]
 
         func skyColor(at t: CGFloat, x: Int, y: Int) -> SKColor {
@@ -90,8 +90,8 @@ enum NodeFactory {
 
             // Crescent moon (upper right), mirrored on Y so the open face flips.
             let moonCX = Int(CGFloat(tw) * 0.78)
-            let moonCY = Int(CGFloat(th) * 0.18)
-            let moonR = max(3, tw / 28)
+            let moonCY = Int(CGFloat(th) * 0.16)
+            let moonR = max(5, Int(CGFloat(tw) * Config.moonRadiusFrac))
             drawPixelCircle(cg, cx: moonCX, cy: moonCY, r: moonR, color: Config.moonColor)
             let punchT = CGFloat(moonCY) / CGFloat(max(th - 1, 1))
             // Punch on the left side (was +x) → crescent opens the other way.
@@ -171,7 +171,7 @@ enum NodeFactory {
     // MARK: - Tunnel
 
     static func ring(halfW: CGFloat, halfH: CGFloat, scale: CGFloat,
-                     t: CGFloat, center: CGPoint) -> SKShapeNode {
+                     t: CGFloat, center: CGPoint, index: Int = 0) -> SKShapeNode {
         let w = snap(halfW * scale)
         let h = snap(halfH * scale)
         // iPhone-style corner: a fixed fraction of court width, shrinking with
@@ -181,14 +181,24 @@ enum NodeFactory {
         let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
         let node = SKShapeNode(rect: rect, cornerRadius: r)
         node.position = center
-        node.fillColor = .clear
-        node.strokeColor = Config.wallNeonPink
-        node.lineWidth = Config.ringLineWidthNear
-        node.alpha = lerp(Config.ringAlphaNear, Config.ringAlphaFar, t)
+        node.lineWidth = Config.ringLineWidth(index: index)
         node.glowWidth = 0
         node.isAntialiased = false
         node.lineJoin = .miter
         node.lineCap = .square
+        // Far plane = soft pink fill + hairline outline (thinner than far wire
+        // rings so fill+stroke doesn't read heavier than the second-to-last wall).
+        let isFarWall = index >= Config.ringCount - 1
+        if isFarWall {
+            node.fillColor = Config.wallNeonPink.withAlphaComponent(Config.farWallFillAlpha)
+            node.strokeColor = Config.wallNeonPink.withAlphaComponent(Config.farWallStrokeAlpha)
+            node.lineWidth = Config.farWallStrokeWidth
+            node.alpha = 1
+        } else {
+            node.fillColor = .clear
+            node.strokeColor = Config.wallNeonPink
+            node.alpha = lerp(Config.ringAlphaNear, Config.ringAlphaFar, t)
+        }
         return node
     }
 

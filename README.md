@@ -17,10 +17,12 @@ STATUS gate is green (device feel, Config freeze, cold second-person test).
 
 ```
 TunnelPong/
-├── STATUS.md / LEDGER.md / README.md
+├── STATUS.md / LEDGER.md / MEMORY.md / README.md
 ├── docs/
 │   ├── ROADMAP.md                 v1→v2→v3 scope, gate, decisions
 │   └── V2_DESIGN.md               local 1v1 implementation blueprint
+├── bin/play-mac.sh                Mac Catalyst build + launch
+├── bin/make-icon.swift            regenerate app icon
 ├── TunnelPong.xcodeproj
 ├── TunnelPong/
 │   ├── AppDelegate.swift
@@ -29,7 +31,10 @@ TunnelPong/
 │   ├── Projection.swift           Projector + CourtMath + PeerMirror
 │   ├── GameScene.swift            solo state machine, physics, AI, HUD
 │   ├── Nodes.swift
-│   └── Haptics.swift
+│   ├── PixelFont.swift            procedural 5×7 type
+│   ├── Audio.swift                procedural SFX + ambient (zero audio files)
+│   ├── Haptics.swift
+│   └── Assets.xcassets            app icon only
 └── TunnelPongTests/
     └── CourtMathTests.swift       math + PeerMirror tests (⌘U)
 ```
@@ -57,8 +62,9 @@ A legacy `/Applications/Xcode.app` Simulator (v13.x) can crash on modern macOS
 Difficulty ramps linearly L1→L10 and then **holds at L10 forever**. Each ramping
 variable has an `*L1` and `*L10` pair — edit those endpoints, not ad-hoc multipliers.
 
-1. **`aiSpeedL1` / `aiSpeedL10`** — how fast the AI can chase the ball. **Only**
-   AI skill dial (pure tracking — no aim error / reaction delay).
+1. **`aiSpeedL1` / `aiSpeedL10`** — how fast the AI can chase the ball's
+   **current** XY. **Only** AI skill dial (live tracking — no intercept
+   prediction, no aim error, no reaction delay).
 2. **`ballSpeedL1` / `ballSpeedL10`** — ball speed.
 3. **`englishL1` / `englishL10`** — off-center spin bite (your skill expression).
 
@@ -94,4 +100,5 @@ Xcode → **⌘U**. Covers perspective, wall fold, velocity renorm, ring helpers
 | v2 local 1v1 (Multipeer, split authority) | Gated — see STATUS |
 | v3 internet (GameKit) | Deferred; prefer ghost/leaderboards unless demand |
 
-Out of scope for v1: sound, multiplayer, networking, ads, IAP, analytics, accounts.
+Out of scope for v1: multiplayer, networking, ads, IAP, analytics, accounts.
+(Audio is in: procedural, no asset files.)

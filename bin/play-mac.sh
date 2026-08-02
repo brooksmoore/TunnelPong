@@ -57,4 +57,5 @@ sleep 0.3
 echo "→ Launching: $APP"
 open "$APP"
 echo "Mac play: move the mouse — paddle follows (no click held)."
-echo "Click still starts a run / pauses / menus."
+echo "Serve: click the ball, or click-drag across it (hover alone does not serve)."
+echo "Click also starts a run / pauses / menus."

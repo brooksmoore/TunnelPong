@@ -70,20 +70,23 @@ final class Audio {
         prepare()
         guard started else { return }
         if on {
-            guard ambientPlayer == nil, let buf = ambientBuffer else { return }
-            let player = AVAudioPlayerNode()
-            engine.attach(player)
-            engine.connect(player, to: mainMixer, format: buf.format)
-            player.volume = Config.audioAmbient * Config.audioMaster
-            player.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
-            player.play()
-            ambientPlayer = player
-        } else {
-            if let p = ambientPlayer {
-                p.stop()
-                engine.detach(p)
-                ambientPlayer = nil
+            // Attach once; stop/play only. Attach/detach on a live engine was
+            // the same cost class as the old one-shot leak.
+            if ambientPlayer == nil, ambientBuffer != nil, let format {
+                let player = AVAudioPlayerNode()
+                engine.attach(player)
+                engine.connect(player, to: mainMixer, format: format)
+                ambientPlayer = player
             }
+            guard let player = ambientPlayer, let buf = ambientBuffer else { return }
+            player.volume = Config.audioAmbient * Config.audioMaster
+            if !player.isPlaying {
+                player.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
+                player.play()
+            }
+        } else {
+            ambientPlayer?.stop()
+            // Keep the node attached for the next title/play cycle.
         }
     }
 

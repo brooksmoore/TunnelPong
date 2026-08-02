@@ -53,15 +53,24 @@ final class GameScene: SKScene {
     private var pointFreezeCountdown: CGFloat = 0
     private var pendingPointWin = false   // true = you scored, false = you lost a life
     // Serve strike tracking (Mac: click/drag on ball; iOS: drag across ball).
+    /// Serve gesture: accumulate travel so swipe threshold is FPS-independent.
+    private var serveDragStart: CGPoint?
     private var serveDragPrev: CGPoint?
+    /// Last-frame delta (instant spin intensity).
     private var serveDragDelta: CGPoint = .zero
+    /// Path length since touch-down (swipe threshold).
+    private var serveDragTravel: CGFloat = 0
+    /// Net displacement from start (spin direction on serve).
+    private var serveDragNet: CGPoint = .zero
+
+
 
     // MARK: - Paddles (world coordinates)
 
     private var px: CGFloat = 0, py: CGFloat = 0        // player, at z = 0
     private var touchTarget: CGPoint?                   // where the finger wants the paddle
     private var ox: CGFloat = 0, oy: CGFloat = 0        // opponent, at z = zFar
-    // AI is pure tracking — no aim error / reaction delay (see stepAI).
+    // AI is pure live-XY tracking — no intercept predict / aim error / delay.
 
     // MARK: - Timers
 
@@ -102,6 +111,7 @@ final class GameScene: SKScene {
     private var hudNode: SKNode!
     private var hudLevelLabel: PixelLabel!
     private var hudScoreLabel: PixelLabel!
+    private var hudHighScoreLabel: PixelLabel!
     private var hudPlayerLives: PixelLabel!
     private var hudOppLives: PixelLabel!
     private var pauseButton: PixelLabel!
@@ -126,16 +136,7 @@ final class GameScene: SKScene {
 
     override func didMove(to view: SKView) {
         backgroundColor = .black
-        // Court is fitted to the SAFE vertical band, not the raw screen, so the
-        // top wall always passes below the notch / Dynamic Island instead of
-        // being sliced by it. The vanishing point sits at the band's centre.
-        let topSafe = max(safeInsets.top, 0)
-        let botSafe = max(safeInsets.bottom, 0)
-        courtTopY = size.height - topSafe - Config.courtTopPad
-        let courtBottomY = botSafe + Config.courtBottomPad
-        proj.center = CGPoint(x: size.width / 2, y: (courtTopY + courtBottomY) / 2)
-        halfW = size.width / 2 * Config.courtWidthFactor
-        halfH = (courtTopY - courtBottomY) / 2 * Config.courtHeightFactor
+        applyCourtMetrics()
 
         backdropNode.zPosition = -100
         addChild(backdropNode)
@@ -165,22 +166,37 @@ final class GameScene: SKScene {
         max(safeInsets.bottom, 0) + Config.hudBottomPad
     }
 
-    /// Call after safeInsets or size change (Mac resize, notch, titlebar).
-    /// Court geometry stays screen-centered; only chrome (HUD / title) moves into the safe band.
-    func applyChromeLayout() {
-        // Court is fitted to the SAFE vertical band, not the raw screen, so the
-        // top wall always passes below the notch / Dynamic Island instead of
-        // being sliced by it. The vanishing point sits at the band's centre.
+    /// Heart row in the safe-top / Island-ear band — always *above* the tunnel.
+    private func heartsBandY() -> CGFloat {
+        let topSafe = max(safeInsets.top, 0)
+        if topSafe >= 44 {
+            return size.height - topSafe * 0.48
+        }
+        // Mac titlebar / small inset.
+        return size.height - max(topSafe, 8) - 16
+    }
+
+    /// Immersive court: safe vertical band under hearts, above bottom score bar.
+    /// Sky shows around the tunnel (not a full-frame bezel).
+    private func applyCourtMetrics() {
         let topSafe = max(safeInsets.top, 0)
         let botSafe = max(safeInsets.bottom, 0)
-        courtTopY = size.height - topSafe - Config.courtTopPad
-        let courtBottomY = botSafe + Config.courtBottomPad
+        let heartsY = heartsBandY()
+        let underHearts = heartsY - Config.heartsToCourtGap
+        let underSafe = size.height - topSafe - Config.courtTopPad
+        courtTopY = min(underHearts, underSafe)
+        let courtBottomY = botSafe + Config.courtBottomPad + Config.bottomScoreBand
+        if courtTopY - courtBottomY < 220 {
+            courtTopY = courtBottomY + 220
+        }
         proj.center = CGPoint(x: size.width / 2, y: (courtTopY + courtBottomY) / 2)
         halfW = size.width / 2 * Config.courtWidthFactor
         halfH = (courtTopY - courtBottomY) / 2 * Config.courtHeightFactor
-        // halfW/halfH ARE the ball's walls, so the drawn tunnel has to be
-        // rebuilt from them — repositioning alone would leave the wireframe
-        // describing the old court after a Mac window resize.
+    }
+
+    /// Call after safeInsets or size change (Mac resize, notch, titlebar).
+    func applyChromeLayout() {
+        applyCourtMetrics()
         rebuildBackdrop()
         rebuildTunnelGeometry()
         layoutHUD()
@@ -197,9 +213,10 @@ final class GameScene: SKScene {
     }
 
     /// Night-sky gradient + stars + moon. LCD overlay + light vignette on top.
-    /// Rebuilt only when the frame actually changes size.
+    /// Rebuilt when frame size changes (or backdropSize is cleared to force regen).
     private func rebuildBackdrop() {
-        guard size.width > 0, size.height > 0, size != backdropSize else { return }
+        guard size.width > 0, size.height > 0 else { return }
+        if size == backdropSize { return }
         backdropSize = size
         backdropNode.removeAllChildren()
 
@@ -262,24 +279,56 @@ final class GameScene: SKScene {
             let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
             node.path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
             node.position = proj.center
+            node.lineWidth = Config.ringLineWidth(index: i)
+            // Far plane: soft pink fill + hairline outline (visually matches
+            // second-to-last wire; fill+stroke needs a thinner lineWidth).
+            if i >= Config.ringCount - 1 {
+                node.fillColor = Config.wallNeonPink.withAlphaComponent(Config.farWallFillAlpha)
+                node.strokeColor = Config.wallNeonPink.withAlphaComponent(Config.farWallStrokeAlpha)
+                node.lineWidth = Config.farWallStrokeWidth
+                node.alpha = 1
+            } else {
+                node.fillColor = .clear
+                node.strokeColor = Config.wallNeonPink
+                node.lineWidth = Config.ringLineWidth(index: i)
+                node.alpha = NodeFactory.lerp(Config.ringAlphaNear, Config.ringAlphaFar, t)
+            }
             if i < depthPanels.count {
                 depthPanels[i].path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
                 depthPanels[i].position = proj.center
             }
         }
-        // Four continuous corner rails from the near plane to the vanishing point.
+        // Z-axis corner rails: (1) stubs past the near plane toward the camera,
+        // then (2) one segment per ring gap so stroke tapers 3→2→1 into the far wall.
+        let gaps = max(Config.ringCount - 1, 1)
         var i = 0
         for sx: CGFloat in [-1, 1] {
             for sy: CGFloat in [-1, 1] {
-                guard i < railSegments.count else { break }
-                let path = CGMutablePath()
-                path.move(to: railAnchor(sx: sx, sy: sy, z: 0))
-                path.addLine(to: railAnchor(sx: sx, sy: sy, z: Config.zFar))
-                railSegments[i].path = path
-                railSegments[i].strokeColor = Config.wallNeonPink
-                railSegments[i].lineWidth = Config.railLineWidth
-                railSegments[i].alpha = Config.cornerLineAlpha
-                i += 1
+                // Past player POV: z < 0 (toward camera). Thick neon, high alpha.
+                if i < railSegments.count {
+                    let path = CGMutablePath()
+                    path.move(to: railAnchor(sx: sx, sy: sy, z: Config.railNearExtendZ))
+                    path.addLine(to: railAnchor(sx: sx, sy: sy, z: 0))
+                    railSegments[i].path = path
+                    railSegments[i].strokeColor = Config.wallNeonPink
+                    railSegments[i].lineWidth = Config.railNearExtendWidth
+                    railSegments[i].alpha = min(1, Config.cornerLineAlpha * 1.05)
+                    i += 1
+                }
+                for seg in 0..<gaps {
+                    guard i < railSegments.count else { break }
+                    let z0 = Config.zFar * CourtMath.ringT(index: seg, ringCount: Config.ringCount)
+                    let z1 = Config.zFar * CourtMath.ringT(index: seg + 1, ringCount: Config.ringCount)
+                    let path = CGMutablePath()
+                    path.move(to: railAnchor(sx: sx, sy: sy, z: z0))
+                    path.addLine(to: railAnchor(sx: sx, sy: sy, z: z1))
+                    railSegments[i].path = path
+                    railSegments[i].strokeColor = Config.wallNeonPink
+                    railSegments[i].lineWidth = Config.railLineWidth(index: seg)
+                    let t = CourtMath.ringT(index: seg, ringCount: Config.ringCount)
+                    railSegments[i].alpha = Config.cornerLineAlpha * NodeFactory.lerp(1.0, 0.75, t)
+                    i += 1
+                }
             }
         }
         rebuildGridPaths()
@@ -356,27 +405,31 @@ final class GameScene: SKScene {
 
     private func layoutHUD() {
         guard hudNode != nil, hudPlayerLives != nil else { return }
-        let topSafe = max(safeInsets.top, 0)
-        let bottomY = layoutBottomInset
-        let sidePad = max(safeInsets.left, safeInsets.right, 10) + 8
+        let botSafe = max(safeInsets.bottom, 0)
+        let sidePad = max(safeInsets.left, safeInsets.right, 10) + 10
         let cx = size.width / 2
 
-        // Hearts in the status-bar / Dynamic Island *ear* band (left & right of
-        // the island). Level + score sit fully under the safe top so they never
-        // land on the notch.
-        let heartsY: CGFloat = topSafe >= 44
-            ? size.height - topSafe * 0.48
-            : size.height - topSafe - 12
-        // Sit inside the tunnel, below the top wall, so neither the readout
-        // nor the wall line collides with the island.
-        let chromeY = courtTopY - Config.hudTopGap
-
+        // Top: hearts + LVL chrome (page header).
+        let heartsY = heartsBandY()
         hudPlayerLives.position = CGPoint(x: sidePad, y: heartsY)
         hudOppLives.position = CGPoint(x: size.width - sidePad, y: heartsY)
-        hudLevelLabel.position = CGPoint(x: cx, y: chromeY)
-        hudScoreLabel.position = CGPoint(x: cx, y: chromeY - Config.hudScoreGap)
-        pauseButton.position = CGPoint(x: size.width - sidePad - 10, y: bottomY)
-        serveHintLabel.position = CGPoint(x: cx, y: bottomY + 32)
+        let lvlY = min(heartsY - 22, courtTopY - Config.hudTopGap)
+        hudLevelLabel.position = CGPoint(x: cx, y: lvlY)
+
+        // Bottom of *court* (not screen edge): score, then serve hint under it.
+        // Keeps "CLICK OR DRAG TO SERVE" fully on-screen inside the play band.
+        let courtFloor = proj.center.y - halfH
+        // Score above serve hint with a clear gap (hint a few px lower).
+        let scoreY = courtFloor + 34
+        let serveY = courtFloor + 6
+        let minFloor = botSafe + Config.hudBottomPad + 36
+        let safeScoreY = max(scoreY, minFloor + 28)
+        let safeServeY = max(serveY, minFloor)
+
+        hudScoreLabel.position = CGPoint(x: cx, y: safeScoreY)
+        serveHintLabel.position = CGPoint(x: cx, y: safeServeY)
+        pauseButton.position = CGPoint(x: size.width - sidePad - 8, y: safeScoreY)
+        hudHighScoreLabel?.isHidden = true
     }
 
     private func layoutOverlays() {
@@ -438,7 +491,7 @@ final class GameScene: SKScene {
             let z = Config.zFar * t
             let node = NodeFactory.ring(halfW: halfW, halfH: halfH,
                                         scale: proj.scale(z: z), t: t,
-                                        center: proj.center)
+                                        center: proj.center, index: i)
             node.zPosition = 4
             worldNode.addChild(node)
             rings.append(node)
@@ -470,9 +523,13 @@ final class GameScene: SKScene {
             }
             ringPulses.append(SKAction.sequence([up, down, restore]))
         }
-        // Four continuous corner rails (near plane → far plane).
-        for _ in 0..<4 {
-            let rail = NodeFactory.railSegment(t: 0.5)
+        // Four corners × (1 near-extend + ringCount−1 depth segs) for POV stubs + 3→2→1 taper.
+        let segsPerCorner = 1 + max(Config.ringCount - 1, 1)
+        let railCount = 4 * segsPerCorner
+        for s in 0..<railCount {
+            let local = s % segsPerCorner
+            let t = local == 0 ? 0 : CourtMath.ringT(index: local - 1, ringCount: Config.ringCount)
+            let rail = NodeFactory.railSegment(t: t)
             rail.zPosition = 3
             worldNode.addChild(rail)
             railSegments.append(rail)
@@ -539,25 +596,33 @@ final class GameScene: SKScene {
         addChild(hudNode)
 
         // Positions set by layoutHUD() via applyChromeLayout() (safe-area aware).
-        hudPlayerLives = NodeFactory.hudLabel("", size: 15, color: Config.playerColor, alpha: 0.7)
+        // Hearts slightly larger + full opacity so they stay readable on the sky.
+        hudPlayerLives = NodeFactory.hudLabel("♥♥♥", size: 18, color: Config.playerColor, alpha: 1.0)
         hudPlayerLives.hAlign = .left
         hudNode.addChild(hudPlayerLives)
 
-        hudOppLives = NodeFactory.hudLabel("", size: 13, color: Config.opponentColor, alpha: 0.7)
+        hudOppLives = NodeFactory.hudLabel("♥♥♥", size: 16, color: Config.opponentColor, alpha: 0.95)
         hudOppLives.hAlign = .right
         hudNode.addChild(hudOppLives)
 
-        hudLevelLabel = NodeFactory.hudLabel("LV 1", size: 15, color: Config.hudColor, alpha: 0.65)
+        // Same chrome type as CYBER/PONG title wordmark.
+        hudLevelLabel = NodeFactory.titleLabel("LVL 1", size: 16, color: Config.titleChromeTop)
+        hudLevelLabel.alpha = 0.95
         hudNode.addChild(hudLevelLabel)
 
-        hudScoreLabel = NodeFactory.hudLabel("0", size: 20, color: Config.hudColor, alpha: 0.85)
+        hudScoreLabel = NodeFactory.hudLabel("0", size: 22, color: Config.hudColor, alpha: 0.95)
         hudNode.addChild(hudScoreLabel)
+
+        // High score is title + game-over only (not live HUD).
+        hudHighScoreLabel = NodeFactory.hudLabel("", size: 14, color: Config.hudColor, alpha: 0)
+        hudHighScoreLabel.isHidden = true
+        hudNode.addChild(hudHighScoreLabel)
 
         // Pixel font has "|" not the geometric pause bars.
         pauseButton = NodeFactory.hudLabel("||", size: 17, color: Config.hudColor, alpha: 0.4)
         hudNode.addChild(pauseButton)
 
-        serveHintLabel = NodeFactory.hudLabel("CLICK TO SERVE", size: 15, color: Config.titleAccent, alpha: 0.9)
+        serveHintLabel = NodeFactory.hudLabel("SWIPE TO SERVE", size: 15, color: Config.titleAccent, alpha: 0.9)
         serveHintLabel.isHidden = true
         hudNode.addChild(serveHintLabel)
 
@@ -609,11 +674,13 @@ final class GameScene: SKScene {
         goScoreLabel = NodeFactory.hudLabel("SCORE 0", size: 22, color: Config.hudColor)
         goScoreLabel.position = CGPoint(x: cx, y: cy + 40)
         gameOverLayer.addChild(goScoreLabel)
-        goHighLabel = NodeFactory.hudLabel("HIGH SCORE 0", size: 15, color: Config.hudColor, alpha: 0.65)
-        goHighLabel.position = CGPoint(x: cx, y: cy)
+        // Becomes chrome "NEW HIGH SCORE" when you beat the record.
+        goHighLabel = NodeFactory.titleLabel("HIGH SCORE 0", size: 18, color: Config.titleChromeTop)
+        goHighLabel.position = CGPoint(x: cx, y: cy - 8)
+        goHighLabel.alpha = 0.85
         gameOverLayer.addChild(goHighLabel)
         let replay = NodeFactory.hudLabel("TAP TO REPLAY", size: 18, color: .white, alpha: 0.85)
-        replay.position = CGPoint(x: cx, y: cy - 90)
+        replay.position = CGPoint(x: cx, y: cy - 100)
         replay.run(pulseForever())
         gameOverLayer.addChild(replay)
         gameOverLayer.isHidden = true
@@ -676,12 +743,13 @@ final class GameScene: SKScene {
         return min(raw, ballMaxLateralSpeed() * frac)
     }
 
+    /// Full english from L1 — intensity scales with ball speed, not level t.
     private func englishStrength() -> CGFloat {
-        Config.lerp(Config.englishL1, Config.englishL10, difficultyT())
+        Config.englishStrength
     }
 
     private func serveDragSpin() -> CGFloat {
-        Config.lerp(Config.serveDragL1, Config.serveDragL10, difficultyT())
+        Config.serveDragSpin
     }
 
     /// World-space: does the player paddle cover the (parked) serve ball?
@@ -713,6 +781,10 @@ final class GameScene: SKScene {
         Audio.shared.uiTap()
         level = 1
         score = 0
+        // Fresh run: plain score until (if) it surpasses highScore.
+        hudScoreLabel.setStyle(.plain)
+        hudScoreLabel.tint = Config.hudColor
+        hudScoreLabel.alpha = 0.95
         playerLives = Config.playerLives
         opponentLives = Config.opponentLivesPerLevel
         px = 0; py = 0; ox = 0; oy = 0
@@ -765,7 +837,7 @@ final class GameScene: SKScene {
             // window. The "cover the ball first" half is taught by the
             // affordance in update(), not by more text.
             #if targetEnvironment(macCatalyst)
-            serveHintLabel.display("CLICK TO SERVE")
+            serveHintLabel.display("CLICK OR DRAG TO SERVE")
             #else
             serveHintLabel.display("SWIPE TO SERVE")
             #endif
@@ -776,8 +848,43 @@ final class GameScene: SKScene {
     }
 
     private func clearServeGesture() {
+        serveDragStart = nil
         serveDragPrev = nil
         serveDragDelta = .zero
+        serveDragTravel = 0
+        serveDragNet = .zero
+    }
+
+    /// Spin vector for the current press gesture (net displacement preferred).
+    private func serveSpinVector() -> CGPoint {
+        if hypot(serveDragNet.x, serveDragNet.y) > 2 { return serveDragNet }
+        if hypot(serveDragDelta.x, serveDragDelta.y) > 2 { return serveDragDelta }
+        return .zero
+    }
+
+    private func serveTravelMin() -> CGFloat {
+        #if targetEnvironment(macCatalyst)
+        return Config.serveSwipeMinMac
+        #else
+        return Config.serveSwipeMin
+        #endif
+    }
+
+    /// Drag-serve: paddle on ball + enough travel while button/finger is down.
+    private func tryDragServe() {
+        guard awaitingPlayerServe, !ballLive, pointFreezeCountdown <= 0 else { return }
+        guard paddleOverlapsServeBall() else { return }
+        guard serveDragTravel > serveTravelMin() else { return }
+        launchPlayerServe(dragScreen: serveSpinVector())
+    }
+
+    /// Click/tap-serve: press ended while paddle still covers the ball.
+    /// Short click (little travel) counts; pure hover never reaches here.
+    private func tryClickServe() {
+        guard awaitingPlayerServe, !ballLive, pointFreezeCountdown <= 0 else { return }
+        guard serveDragStart != nil else { return }  // must have pressed
+        guard paddleOverlapsServeBall() else { return }
+        launchPlayerServe(dragScreen: serveSpinVector())
     }
 
     /// Opponent auto-serve (toward you).
@@ -964,10 +1071,27 @@ final class GameScene: SKScene {
         // Capture before saveHighScoreIfNeeded overwrites highScore.
         let isNewHigh = score > highScore && score > 0
         saveHighScoreIfNeeded()
-        goTitleLabel.display("GAME OVER")
-        goTitleLabel.tint = .white
-        goScoreLabel.display("SCORE \(score)")
-        goHighLabel.display(isNewHigh ? "NEW HIGH SCORE" : "HIGH SCORE \(highScore)")
+        goTitleLabel.removeAllActions()
+        goHighLabel.removeAllActions()
+        goTitleLabel.setScale(1)
+        goHighLabel.setScale(1)
+
+        if isNewHigh {
+            // Celebrate: chrome title, pulse, stronger feedback.
+            goTitleLabel.display("NEW HIGH")
+            goScoreLabel.display("SCORE \(score)")
+            goHighLabel.display("HIGH SCORE \(highScore)")
+            goHighLabel.alpha = 1
+            goTitleLabel.run(pulseForever())
+            goHighLabel.run(pulseForever())
+            Haptics.shared.levelUp()
+            Audio.shared.levelUp()
+        } else {
+            goTitleLabel.display("GAME OVER")
+            goScoreLabel.display("SCORE \(score)")
+            goHighLabel.display("HIGH SCORE \(highScore)")
+            goHighLabel.alpha = 0.85
+        }
         gameOverLayer.isHidden = false
         ballNode.isHidden = true
         playerPaddleNode.isHidden = true
@@ -1003,13 +1127,29 @@ final class GameScene: SKScene {
 
     // MARK: - HUD updates (event-driven; nothing here runs per frame)
 
-    private func updateScoreHUD() { hudScoreLabel.display("\(score)") }
-    private func updateLevelHUD() { hudLevelLabel.display("LV \(level)") }
+    private func updateScoreHUD() {
+        hudScoreLabel.display("\(score)")
+        // Once this run beats the saved high score, score stays chrome (title/LVL)
+        // for the rest of the run as a live high-score achievement cue.
+        if score > highScore && score > 0 {
+            hudScoreLabel.setStyle(.chrome)
+            hudScoreLabel.alpha = 1
+        } else {
+            hudScoreLabel.setStyle(.plain)
+            hudScoreLabel.tint = Config.hudColor
+            hudScoreLabel.alpha = 0.95
+        }
+    }
+    private func updateLevelHUD() { hudLevelLabel.display("LVL \(level)") }
     private func updateLivesHUD() {
         // Hearts are spare lives. An empty row is the warning — you're on your
         // last life — so it needs no label.
         hudPlayerLives.display(String(repeating: "♥", count: max(playerLives, 0)))
         hudOppLives.display(String(repeating: "♥", count: max(opponentLives, 0)))
+        hudPlayerLives.isHidden = false
+        hudOppLives.isHidden = false
+        hudPlayerLives.alpha = 1
+        hudOppLives.alpha = 0.95
     }
 
     // MARK: - Update loop
@@ -1131,6 +1271,7 @@ final class GameScene: SKScene {
     }
 
     /// Mac Catalyst: paddle follows the mouse with no click held.
+    /// Hover never serves — that needs a click or click-drag (see touches*).
     func pointerMoved(to loc: CGPoint) {
         guard phase == .playing || phase == .levelTransition else { return }
         setTouchTarget(loc)
@@ -1227,11 +1368,11 @@ final class GameScene: SKScene {
                            paddleHalfW: CGFloat, paddleHalfH: CGFloat,
                            newZ: CGFloat, outbound: Bool) {
         let speed = sqrt(vx * vx + vy * vy + vz * vz)
-        // English: off-center / corner hit; strength ramps mildly with level.
+        // English: full capability always; eng * speed grows as the game speeds up.
         let nX = max(-1, min(1, (xc - cx) / paddleHalfW))
         let nY = max(-1, min(1, (yc - cy) / paddleHalfH))
         let corner = abs(nX) * abs(nY)
-        let eng = englishStrength() * (1 + Config.serveCornerBoost * corner * 0.5)
+        let eng = englishStrength() * (1 + Config.serveCornerBoost * corner * 0.55)
         vx += nX * eng * speed
         vy += nY * eng * speed
         vz = outbound ? abs(vz) : -abs(vz)
@@ -1264,8 +1405,10 @@ final class GameScene: SKScene {
 
     // MARK: - Opponent AI
     //
-    // Pure tracking, Flappy Bird style: chase the ball intercept as hard as
-    // aiSpeed allows. No aim error, no reaction delay, no corner hunting.
+    // Pure ball XY tracking. Chase the ball's *current* world XY as hard as
+    // aiSpeed allows — never the future intercept, never wall-bounce folds.
+    // (Predicting "where it will land" is how it used to feel psychic.)
+    // No aim error, no reaction delay, no corner hunting.
     // Difficulty is ONLY "it gets faster" (Config.aiSpeedL1 → L10).
 
     private func stepAI(_ dt: CGFloat) {
@@ -1275,23 +1418,12 @@ final class GameScene: SKScene {
             return
         }
 
-        let tx: CGFloat
-        let ty: CGFloat
+        // Live ball position only. Clamp to the ball's wall bounds so the AI
+        // never aims outside the court when the ball is in a corner.
         let effW = halfW - Config.ballRadius
         let effH = halfH - Config.ballRadius
-
-        if vz > 0.001 {
-            // Ball coming at the AI: track where it will cross the far plane
-            // (wall bounces folded in). Exact intercept — no offset.
-            let tHit = max(0, (Config.zFar - bz) / vz)
-            tx = CourtMath.reflect(bx + vx * tHit, limit: effW)
-            ty = CourtMath.reflect(by + vy * tHit, limit: effH)
-        } else {
-            // Ball going back to the player: keep tracking its XY so the
-            // paddle doesn't invent a fake recenter dodge.
-            tx = max(-effW, min(effW, bx))
-            ty = max(-effH, min(effH, by))
-        }
+        let tx = max(-effW, min(effW, bx))
+        let ty = max(-effH, min(effH, by))
 
         let step = aiSpeed() * dt
         ox = CourtMath.moveToward(ox, target: tx, maxStep: step)
@@ -1397,17 +1529,21 @@ final class GameScene: SKScene {
                 return
             }
             if awaitingPlayerServe {
+                // Press starts a serve gesture (click or drag). Hover alone does not.
+                serveDragStart = loc
                 serveDragPrev = loc
                 serveDragDelta = .zero
+                serveDragTravel = 0
+                serveDragNet = .zero
                 #if targetEnvironment(macCatalyst)
-                // Do not setTouchTarget — that was jumping the paddle to the click.
+                // Aim still follows hover; press only arms serve.
                 #else
                 beginRelativeDrag(at: loc)
                 #endif
                 return
             }
             #if targetEnvironment(macCatalyst)
-            // Hover owns aim on Mac; clicks are for serve / UI only.
+            // Hover owns aim on Mac; clicks are UI / serve only.
             #else
             beginRelativeDrag(at: loc)
             #endif
@@ -1425,19 +1561,21 @@ final class GameScene: SKScene {
 
         if phase == .playing, awaitingPlayerServe {
             if let prev = serveDragPrev {
-                serveDragDelta = CGPoint(x: loc.x - prev.x, y: loc.y - prev.y)
+                let step = CGPoint(x: loc.x - prev.x, y: loc.y - prev.y)
+                serveDragDelta = step
+                serveDragTravel += hypot(step.x, step.y)
+            }
+            if let start = serveDragStart {
+                serveDragNet = CGPoint(x: loc.x - start.x, y: loc.y - start.y)
             }
             serveDragPrev = loc
-            #if !targetEnvironment(macCatalyst)
+            #if targetEnvironment(macCatalyst)
+            setTouchTarget(loc)
+            #else
             updateRelativeDrag(to: loc)
-            // Sweep the paddle across the ball to serve — the drag that steers
-            // is the same motion that strikes, so it fires mid-drag rather than
-            // waiting for you to lift.
-            if paddleOverlapsServeBall(),
-               hypot(serveDragDelta.x, serveDragDelta.y) > Config.serveSwipeMin {
-                launchPlayerServe(dragScreen: serveDragDelta)
-            }
             #endif
+            // Drag-across: fire mid-gesture once travel is deliberate.
+            tryDragServe()
             return
         }
 
@@ -1448,10 +1586,12 @@ final class GameScene: SKScene {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if phase == .playing, awaitingPlayerServe {
-            // Strike if paddle covers the ball (any face region), or click was on ball
-            // while already overlapping from hover/finger.
-            if paddleOverlapsServeBall() {
-                launchPlayerServe(dragScreen: serveDragDelta)
+            // Click/tap on the ball, or release after a drag-swipe.
+            // (Hover with no press never gets here.)
+            if serveDragTravel > serveTravelMin() {
+                tryDragServe()
+            } else {
+                tryClickServe()
             }
         }
         clearServeGesture()
