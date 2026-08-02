@@ -57,13 +57,13 @@ A legacy `/Applications/Xcode.app` Simulator (v13.x) can crash on modern macOS
 Difficulty ramps linearly L1→L10 and then **holds at L10 forever**. Each ramping
 variable has an `*L1` and `*L10` pair — edit those endpoints, not ad-hoc multipliers.
 
-1. **`aiErrorL1` / `aiErrorL10`** — aim noise (higher = easier). Strongest dial.
+1. **`aiSpeedL1` / `aiSpeedL10`** — how fast the AI can chase the ball. **Only**
+   AI skill dial (pure tracking — no aim error / reaction delay).
 2. **`ballSpeedL1` / `ballSpeedL10`** — ball speed.
-3. **`aiSpeedL1` / `aiSpeedL10`** — how fast the AI paddle travels.
+3. **`englishL1` / `englishL10`** — off-center spin bite (your skill expression).
 
-`aiLateralFracL1/L10` is **not** a tuning dial — it's a safety ceiling that keeps
-the AI from ever becoming mathematically un-passable. It never binds at the
-current `aiSpeed` values; it only matters if you raise `aiSpeedL10` a lot.
+`aiLateralFracL1/L10` is **not** a tuning dial — safety ceiling only so the AI
+can never become a perfect wall if you crank `aiSpeedL10`.
 
 Player paddle does **not** ramp. When dials stop moving every session, mark that on the v2 gate in `STATUS.md`.
 

@@ -59,9 +59,7 @@ final class GameScene: SKScene {
     private var px: CGFloat = 0, py: CGFloat = 0        // player, at z = 0
     private var touchTarget: CGPoint?                   // where the finger wants the paddle
     private var ox: CGFloat = 0, oy: CGFloat = 0        // opponent, at z = zFar
-    private var aiErrX: CGFloat = 0, aiErrY: CGFloat = 0
-    private var aiReactionClock: CGFloat = 0
-    private var ballWasOutbound = false
+    // AI is pure tracking — no aim error / reaction delay (see stepAI).
 
     // MARK: - Timers
 
@@ -75,11 +73,17 @@ final class GameScene: SKScene {
     private var backdropSize: CGSize = .zero
     private let worldNode = SKNode()
     private var rings: [SKShapeNode] = []
+    private var depthPanels: [SKShapeNode] = []
     private var railSegments: [SKShapeNode] = []
+    private var gridLines: [SKShapeNode] = []
     private var ringPulses: [SKAction] = []
     private var pauseDim: SKSpriteNode!
     private var scanlineNode: SKSpriteNode!
+    private var vignetteNode: SKSpriteNode!
     private var ballNode: SKNode!
+    private var ballShadowNode: SKNode!
+    private var trailGhosts: [SKNode] = []
+    private var trailHistory: [(x: CGFloat, y: CGFloat, z: CGFloat)] = []
     /// Inner layer of the ball that turns; see NodeFactory.ball().
     private weak var ballSpinLayer: SKNode?
     private var ballSpin: CGFloat = 0
@@ -130,6 +134,7 @@ final class GameScene: SKScene {
         applyChromeLayout()
 
         Haptics.shared.prepare()
+        Audio.shared.prepare()
         NotificationCenter.default.addObserver(
             self, selector: #selector(appWillResign),
             name: UIApplication.willResignActiveNotification, object: nil)
@@ -170,77 +175,165 @@ final class GameScene: SKScene {
         renderWorld()
     }
 
-    /// Black sky with a scatter of distant stars — texture only, no colour.
+    /// Night-sky gradient + stars + moon. LCD overlay + light vignette on top.
     /// Rebuilt only when the frame actually changes size.
     private func rebuildBackdrop() {
         guard size.width > 0, size.height > 0, size != backdropSize else { return }
         backdropSize = size
         backdropNode.removeAllChildren()
 
-        let stars = SKSpriteNode(texture: NodeFactory.starFieldTexture(size: size))
-        stars.size = size
-        stars.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        backdropNode.addChild(stars)
+        let sky = SKSpriteNode(texture: NodeFactory.worldBackdropTexture(size: size))
+        sky.size = size
+        sky.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        sky.texture?.filteringMode = .nearest
+        backdropNode.addChild(sky)
 
-        // CRT lines ride above the play field but under the HUD, so the game
-        // looks like it's on a tube while the readouts stay crisp.
+        if vignetteNode == nil {
+            vignetteNode = SKSpriteNode()
+            vignetteNode.zPosition = 65
+            addChild(vignetteNode)
+        }
+        vignetteNode.texture = NodeFactory.vignetteTexture(size: size)
+        vignetteNode.size = size
+        vignetteNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
+
+        // LCD row darkening (GBC screen feel), nearest-neighbour upscale.
         if scanlineNode == nil {
             scanlineNode = SKSpriteNode()
             scanlineNode.zPosition = 70
             addChild(scanlineNode)
         }
-        scanlineNode.texture = NodeFactory.scanlineTexture(size: size)
+        scanlineNode.texture = NodeFactory.lcdOverlayTexture(size: size)
+        scanlineNode.texture?.filteringMode = .nearest
         scanlineNode.size = size
         scanlineNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
     }
 
-    /// Re-derive every ring path and corner rail from the current court size.
+    /// Re-derive rings, panels, rails, and perspective grid from live court size.
     /// Safe to call before the tunnel exists (arrays are empty).
     private func rebuildTunnelGeometry() {
         for (i, node) in rings.enumerated() {
             let t = CourtMath.ringT(index: i, ringCount: Config.ringCount)
             let s = proj.scale(z: Config.zFar * t)
             let w = halfW * s, h = halfH * s
-            let r = Config.ringCornerRadius * s
-            node.path = CGPath(roundedRect: CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h),
-                               cornerWidth: r, cornerHeight: r, transform: nil)
+            // Keep far ring rectangular (not a disc) so rails meet a clean frame.
+            let r = min(Config.ringCornerRadius * s, min(w, h) * 0.22)
+            let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
+            node.path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
             node.position = proj.center
+            if i < depthPanels.count {
+                depthPanels[i].path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+                depthPanels[i].position = proj.center
+            }
         }
+        // Four continuous corner rails from the near plane to the vanishing point.
         var i = 0
         for sx: CGFloat in [-1, 1] {
             for sy: CGFloat in [-1, 1] {
-                for s in 0..<(Config.ringCount - 1) {
-                    guard i < railSegments.count else { return }
-                    let t0 = CourtMath.ringT(index: s, ringCount: Config.ringCount)
-                    let t1 = CourtMath.ringT(index: s + 1, ringCount: Config.ringCount)
-                    let path = CGMutablePath()
-                    path.move(to: proj.project(x: sx * halfW, y: sy * halfH,
-                                               z: Config.zFar * t0))
-                    path.addLine(to: proj.project(x: sx * halfW, y: sy * halfH,
-                                                  z: Config.zFar * t1))
-                    railSegments[i].path = path
-                    i += 1
+                guard i < railSegments.count else { break }
+                let path = CGMutablePath()
+                path.move(to: proj.project(x: sx * halfW, y: sy * halfH, z: 0))
+                path.addLine(to: proj.project(x: sx * halfW, y: sy * halfH, z: Config.zFar))
+                railSegments[i].path = path
+                railSegments[i].strokeColor = Config.wallNeonPink
+                railSegments[i].lineWidth = Config.railLineWidth
+                railSegments[i].alpha = Config.cornerLineAlpha
+                i += 1
+            }
+        }
+        rebuildGridPaths()
+    }
+
+    /// Floor + ceiling depth rungs and longitudinal rails down all four faces.
+    private func rebuildGridPaths() {
+        guard !gridLines.isEmpty else { return }
+        var idx = 0
+        // Depth rungs on floor and ceiling.
+        for faceY: CGFloat in [-1, 1] {
+            for d in 0..<Config.gridDepthLines {
+                guard idx < gridLines.count else { return }
+                let t = CGFloat(d + 1) / CGFloat(Config.gridDepthLines + 1)
+                let z = Config.zFar * t
+                let path = CGMutablePath()
+                path.move(to: proj.project(x: -halfW, y: faceY * halfH, z: z))
+                path.addLine(to: proj.project(x: halfW, y: faceY * halfH, z: z))
+                gridLines[idx].path = path
+                gridLines[idx].strokeColor = Config.wallNeonPink
+                gridLines[idx].alpha = NodeFactory.lerp(Config.gridAlphaNear, Config.gridAlphaFar, t)
+                gridLines[idx].lineWidth = Config.gridLineWidthNear
+                idx += 1
+            }
+        }
+        // Depth rungs on left and right walls.
+        for faceX: CGFloat in [-1, 1] {
+            for d in 0..<Config.gridDepthLines {
+                guard idx < gridLines.count else { return }
+                let t = CGFloat(d + 1) / CGFloat(Config.gridDepthLines + 1)
+                let z = Config.zFar * t
+                let path = CGMutablePath()
+                path.move(to: proj.project(x: faceX * halfW, y: -halfH, z: z))
+                path.addLine(to: proj.project(x: faceX * halfW, y: halfH, z: z))
+                gridLines[idx].path = path
+                gridLines[idx].strokeColor = Config.wallNeonPink
+                gridLines[idx].alpha = NodeFactory.lerp(Config.gridAlphaNear, Config.gridAlphaFar, t)
+                gridLines[idx].lineWidth = Config.gridLineWidthNear
+                idx += 1
+            }
+        }
+        // Longitudinal face lines (off when gridLongLines == 0 — rings + rails only).
+        for face in 0..<4 {
+            for k in 0..<Config.gridLongLines {
+                guard idx < gridLines.count else { return }
+                let u = CGFloat(k + 1) / CGFloat(Config.gridLongLines + 1)
+                let path = CGMutablePath()
+                switch face {
+                case 0:
+                    let x = -halfW + 2 * halfW * u
+                    path.move(to: proj.project(x: x, y: -halfH, z: 0))
+                    path.addLine(to: proj.project(x: x, y: -halfH, z: Config.zFar))
+                case 1:
+                    let x = -halfW + 2 * halfW * u
+                    path.move(to: proj.project(x: x, y: halfH, z: 0))
+                    path.addLine(to: proj.project(x: x, y: halfH, z: Config.zFar))
+                case 2:
+                    let y = -halfH + 2 * halfH * u
+                    path.move(to: proj.project(x: -halfW, y: y, z: 0))
+                    path.addLine(to: proj.project(x: -halfW, y: y, z: Config.zFar))
+                default:
+                    let y = -halfH + 2 * halfH * u
+                    path.move(to: proj.project(x: halfW, y: y, z: 0))
+                    path.addLine(to: proj.project(x: halfW, y: y, z: Config.zFar))
                 }
+                gridLines[idx].path = path
+                gridLines[idx].strokeColor = Config.wallNeonPink
+                gridLines[idx].alpha = Config.gridAlphaNear * 0.7
+                gridLines[idx].lineWidth = Config.gridLineWidthNear
+                idx += 1
             }
         }
     }
 
     private func layoutHUD() {
         guard hudNode != nil, hudPlayerLives != nil else { return }
-        let topY = size.height - layoutTopInset
+        let topSafe = max(safeInsets.top, 0)
         let bottomY = layoutBottomInset
-        let sidePad = max(safeInsets.left, safeInsets.right, 12) + 10
+        let sidePad = max(safeInsets.left, safeInsets.right, 10) + 8
         let cx = size.width / 2
 
-        hudPlayerLives.position = CGPoint(x: sidePad, y: topY)
-        hudOppLives.position = CGPoint(x: size.width - sidePad, y: topY)
-        hudLevelLabel.position = CGPoint(x: cx, y: topY)
-        hudScoreLabel.position = CGPoint(x: cx, y: topY - 26)
+        // Hearts in the status-bar / Dynamic Island *ear* band (left & right of
+        // the island). Level + score sit fully under the safe top so they never
+        // land on the notch.
+        let heartsY: CGFloat = topSafe >= 44
+            ? size.height - topSafe * 0.48
+            : size.height - topSafe - 12
+        let chromeY = size.height - topSafe - Config.hudTopPad
+
+        hudPlayerLives.position = CGPoint(x: sidePad, y: heartsY)
+        hudOppLives.position = CGPoint(x: size.width - sidePad, y: heartsY)
+        hudLevelLabel.position = CGPoint(x: cx, y: chromeY)
+        hudScoreLabel.position = CGPoint(x: cx, y: chromeY - Config.hudScoreGap)
         pauseButton.position = CGPoint(x: size.width - sidePad - 10, y: bottomY)
-        serveHintLabel.position = CGPoint(x: cx, y: bottomY + 36)
-        if pointCalloutLabel != nil {
-            pointCalloutLabel.position = CGPoint(x: cx, y: size.height / 2 + 40)
-        }
+        serveHintLabel.position = CGPoint(x: cx, y: bottomY + 32)
     }
 
     private func layoutOverlays() {
@@ -276,6 +369,27 @@ final class GameScene: SKScene {
     }
 
     private func buildTunnel() {
+        // Soft panels first (behind rings) — shaft volume.
+        for i in 0..<Config.ringCount {
+            let t = CourtMath.ringT(index: i, ringCount: Config.ringCount)
+            let z = Config.zFar * t
+            let panel = NodeFactory.depthPanel(halfW: halfW, halfH: halfH,
+                                               scale: proj.scale(z: z), t: t,
+                                               center: proj.center)
+            panel.zPosition = 1
+            worldNode.addChild(panel)
+            depthPanels.append(panel)
+        }
+
+        // Perspective grid on floor / ceiling / walls.
+        let gridCount = Config.gridDepthLines * 4 + Config.gridLongLines * 4
+        for _ in 0..<gridCount {
+            let line = NodeFactory.gridLine(t: 0.4)
+            line.zPosition = 2.5
+            worldNode.addChild(line)
+            gridLines.append(line)
+        }
+
         for i in 0..<Config.ringCount {
             let t = CourtMath.ringT(index: i, ringCount: Config.ringCount)
             let z = Config.zFar * t
@@ -285,25 +399,43 @@ final class GameScene: SKScene {
             node.zPosition = 4
             worldNode.addChild(node)
             rings.append(node)
-            // Pre-built pulse action per ring (rings have different base alphas),
-            // so wall bounces never allocate.
-            let up = SKAction.fadeAlpha(to: min(node.alpha * 3.0, 0.95), duration: 0.045)
-            let down = SKAction.fadeAlpha(to: node.alpha, duration: 0.30)
-            down.timingMode = .easeOut
-            ringPulses.append(SKAction.sequence([up, down]))
-        }
-        // Corner rails, cut into one span per ring gap so each span can carry
-        // its own colour off the wall ramp — that's the gradient down the rail.
-        for _ in 0..<4 {
-            for s in 0..<(Config.ringCount - 1) {
-                let t = (CourtMath.ringT(index: s, ringCount: Config.ringCount)
-                       + CourtMath.ringT(index: s + 1, ringCount: Config.ringCount)) / 2
-                let seg = NodeFactory.railSegment(t: t)
-                seg.zPosition = 2
-                worldNode.addChild(seg)
-                railSegments.append(seg)
+            // Colour + alpha pop on wall contact — sells which depth ring was hit.
+            let baseA = node.alpha
+            let flashA = min(1.0, baseA * 1.45 + 0.2)
+            let toHit = SKAction.run {
+                node.strokeColor = Config.ringHitColor
             }
+            let up = SKAction.group([
+                toHit,
+                SKAction.fadeAlpha(to: flashA, duration: TimeInterval(Config.ringHitUp)),
+            ])
+            let settleColor = SKAction.customAction(
+                withDuration: TimeInterval(Config.ringHitDown)
+            ) { n, elapsed in
+                let t = CGFloat(min(1, elapsed / Config.ringHitDown))
+                (n as? SKShapeNode)?.strokeColor = Config.blend(
+                    Config.ringHitColor, Config.wallNeonPink, t)
+            }
+            let down = SKAction.group([
+                settleColor,
+                SKAction.fadeAlpha(to: baseA, duration: TimeInterval(Config.ringHitDown)),
+            ])
+            down.timingMode = .easeOut
+            let restore = SKAction.run {
+                node.strokeColor = Config.wallNeonPink
+                node.alpha = baseA
+            }
+            ringPulses.append(SKAction.sequence([up, down, restore]))
         }
+        // Four continuous corner rails (near plane → far plane).
+        for _ in 0..<4 {
+            let rail = NodeFactory.railSegment(t: 0.5)
+            rail.zPosition = 3
+            worldNode.addChild(rail)
+            railSegments.append(rail)
+        }
+
+        rebuildTunnelGeometry()
     }
 
     private func buildActors() {
@@ -313,6 +445,15 @@ final class GameScene: SKScene {
         oppPaddleNode.setScale(proj.scale(z: Config.zFar))
         oppPaddleNode.zPosition = 10
         worldNode.addChild(oppPaddleNode)
+
+        for _ in 0..<Config.trailLength {
+            let g = NodeFactory.trailGhost()
+            worldNode.addChild(g)
+            trailGhosts.append(g)
+        }
+
+        ballShadowNode = NodeFactory.ballShadow()
+        worldNode.addChild(ballShadowNode)
 
         ballNode = NodeFactory.ball()
         ballNode.zPosition = 20
@@ -369,17 +510,17 @@ final class GameScene: SKScene {
         hudScoreLabel = NodeFactory.hudLabel("0", size: 20, color: Config.hudColor, alpha: 0.85)
         hudNode.addChild(hudScoreLabel)
 
-        pauseButton = NodeFactory.hudLabel("❚❚", size: 17, color: Config.hudColor, alpha: 0.4)
+        // Pixel font has "|" not the geometric pause bars.
+        pauseButton = NodeFactory.hudLabel("||", size: 17, color: Config.hudColor, alpha: 0.4)
         hudNode.addChild(pauseButton)
 
         serveHintLabel = NodeFactory.hudLabel("CLICK TO SERVE", size: 15, color: Config.titleAccent, alpha: 0.9)
         serveHintLabel.isHidden = true
         hudNode.addChild(serveHintLabel)
 
+        // Kept for layout compatibility; never shown (hearts carry the feedback).
         pointCalloutLabel = NodeFactory.titleLabel("", size: 32, color: .white)
         pointCalloutLabel.isHidden = true
-        pointCalloutLabel.zPosition = 95
-        addChild(pointCalloutLabel)
     }
 
     private func buildOverlays() {
@@ -390,9 +531,9 @@ final class GameScene: SKScene {
         titleLayer = SKNode()
         titleLayer.zPosition = 100
         addChild(titleLayer)
-        titleLayer.addChild(place(NodeFactory.titleLabel("CYBER", size: 58, color: Config.playerColor), cx, cy + 148))
-        titleLayer.addChild(place(NodeFactory.titleLabel("PONG", size: 58, color: Config.titleAccent), cx, cy + 86))
-        let tap = NodeFactory.hudLabel("TAP TO START", size: 18, color: .white, alpha: 0.85)
+        titleLayer.addChild(place(NodeFactory.titleLabel("CYBER", size: 56, color: Config.playerColor), cx, cy + 148))
+        titleLayer.addChild(place(NodeFactory.titleLabel("PONG", size: 56, color: Config.titleAccent), cx, cy + 86))
+        let tap = NodeFactory.hudLabel("TAP TO START", size: 21, color: Config.moonColor, alpha: 0.9)
         tap.position = CGPoint(x: cx, y: cy - 50)
         tap.run(pulseForever())
         titleLayer.addChild(tap)
@@ -483,23 +624,13 @@ final class GameScene: SKScene {
     }
 
     /// AI XY: linear raw speed, hard-leashed to a rising fraction of ball lateral.
+    /// Only dial for AI difficulty: how fast the paddle can chase the ball.
+    /// Linear L1→L10 — no ease curve.
     private func aiSpeed() -> CGFloat {
         let t = difficultyT()
         let raw = Config.lerp(Config.aiSpeedL1, Config.aiSpeedL10, t)
         let frac = Config.lerp(Config.aiLateralFracL1, Config.aiLateralFracL10, t)
         return min(raw, ballMaxLateralSpeed() * frac)
-    }
-
-    private func aiErrorAmp() -> CGFloat {
-        Config.lerp(Config.aiErrorL1, Config.aiErrorL10, difficultyT())
-    }
-
-    private func aiReactionDelay() -> CGFloat {
-        Config.lerp(Config.aiReactionL1, Config.aiReactionL10, difficultyT())
-    }
-
-    private func aiIdleFactor() -> CGFloat {
-        Config.lerp(Config.aiIdleL1, Config.aiIdleL10, difficultyT())
     }
 
     private func englishStrength() -> CGFloat {
@@ -531,9 +662,12 @@ final class GameScene: SKScene {
         ballNode.isHidden = true
         playerPaddleNode.isHidden = true
         oppPaddleNode.isHidden = true
+        Audio.shared.setAmbient(true)
     }
 
     private func startRun() {
+        Audio.shared.setAmbient(true)
+        Audio.shared.uiTap()
         level = 1
         score = 0
         playerLives = Config.playerLives
@@ -567,9 +701,6 @@ final class GameScene: SKScene {
         ballLive = false
         awaitingPlayerServe = false
         serveCountdown = 0
-        ballWasOutbound = false
-        aiReactionClock = 0
-        aiErrX = 0; aiErrY = 0
         // Every point: opponent starts centered (no crawl back from last rally).
         ox = 0; oy = 0
         ballNode.isHidden = false
@@ -657,31 +788,55 @@ final class GameScene: SKScene {
         ballLive = true
         applySpeed(speed)
         Haptics.shared.paddleHit()
+        Audio.shared.paddleHit(player: true)
+        Audio.shared.serve()
         flashPaddle(playerPaddleNode)
         pulseRing(atZ: bz)
     }
 
-    /// Bloom the struck paddle's halo — the paddle itself never dims, so the
-    /// hit reads as the paddle lighting up rather than blinking out.
+    /// Brief contact cue: outer shell pops + paddle face brightens + tiny scale.
+    /// Reads as a hit without dimming the paddle out.
     private func flashPaddle(_ node: SKNode) {
-        guard let glow = node.childNode(withName: NodeFactory.impactGlowName) else { return }
-        glow.removeAllActions()
-        glow.alpha = 0
-        glow.setScale(1)
-        let bloom = SKAction.group([
-            SKAction.fadeAlpha(to: 1, duration: TimeInterval(Config.paddleGlowUp)),
-            SKAction.scale(to: Config.paddleGlowScale,
-                           duration: TimeInterval(Config.paddleGlowUp)),
-        ])
-        let settle = SKAction.group([
-            SKAction.fadeAlpha(to: 0, duration: TimeInterval(Config.paddleGlowDown)),
-            SKAction.scale(to: 1, duration: TimeInterval(Config.paddleGlowDown)),
-        ])
-        settle.timingMode = .easeOut
-        glow.run(SKAction.sequence([bloom, settle]))
+        guard let paddle = node as? SKShapeNode else { return }
+        let up = TimeInterval(Config.paddleGlowUp)
+        let down = TimeInterval(Config.paddleGlowDown)
+
+        // Outer impact shell.
+        if let glow = paddle.childNode(withName: NodeFactory.impactGlowName) {
+            glow.removeAllActions()
+            glow.alpha = 0
+            glow.setScale(1)
+            let bloom = SKAction.group([
+                SKAction.fadeAlpha(to: 1, duration: up),
+                SKAction.scale(to: Config.paddleGlowScale, duration: up),
+            ])
+            let settle = SKAction.group([
+                SKAction.fadeAlpha(to: 0, duration: down),
+                SKAction.scale(to: 1, duration: down),
+            ])
+            settle.timingMode = .easeOut
+            glow.run(SKAction.sequence([bloom, settle]), withKey: "impactGlow")
+        }
+
+        // Face fill: lift alpha so the slab "pops" on contact.
+        // (No root scale punch — opponent scale is owned by perspective each frame.)
+        paddle.removeAction(forKey: "hitFill")
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        paddle.strokeColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let baseFill = paddle.strokeColor.withAlphaComponent(Config.paddleFillAlpha)
+        paddle.fillColor = paddle.strokeColor.withAlphaComponent(Config.paddleHitFillAlpha)
+        let fillDown = SKAction.customAction(withDuration: down) { n, elapsed in
+            let t = CGFloat(min(1, elapsed / Config.paddleGlowDown))
+            let alpha = Config.paddleHitFillAlpha
+                + (Config.paddleFillAlpha - Config.paddleHitFillAlpha) * t
+            (n as? SKShapeNode)?.fillColor = SKColor(red: r, green: g, blue: b, alpha: alpha)
+        }
+        let fillRestore = SKAction.run { paddle.fillColor = baseFill }
+        paddle.run(SKAction.sequence([fillDown, fillRestore]), withKey: "hitFill")
     }
 
-    /// Ball crossed a plane without a paddle — freeze on the plane, show feedback.
+    /// Ball crossed a plane without a paddle — freeze briefly; hearts update
+    /// immediately (no POINT/MISS text — the missing heart is the message).
     private func beginPointFreeze(playerScored: Bool, atX x: CGFloat, y: CGFloat, z: CGFloat) {
         guard pointFreezeCountdown <= 0, phase == .playing else { return }
         ballLive = false
@@ -689,44 +844,37 @@ final class GameScene: SKScene {
         vx = 0; vy = 0; vz = 0
         pendingPointWin = playerScored
         pointFreezeCountdown = Config.pointFreezeDuration
-        pointCalloutLabel.isHidden = false
+        pointCalloutLabel?.isHidden = true
+
         if playerScored {
-            pointCalloutLabel.display("POINT")
-            pointCalloutLabel.tint = Config.playerColor
+            score += Config.scorePerOpponentLife * level
+            opponentLives -= 1
+            updateScoreHUD()
+            updateLivesHUD()
             Haptics.shared.pointScored()
-            flashNode.color = Config.playerColor
+            Audio.shared.pointScored()
         } else {
-            pointCalloutLabel.display("MISS")
-            pointCalloutLabel.tint = Config.opponentColor
+            // Hearts are SPARE lives. 0 → -1 ends the run after freeze.
+            playerLives -= 1
+            updateLivesHUD()
             Haptics.shared.lifeLost()
-            flashNode.color = Config.opponentColor
+            Audio.shared.lifeLost()
             playShake()
         }
-        flashNode.run(flashAction, withKey: "flash")
         pulseRing(atZ: z)
         renderWorld()
     }
 
     private func resolvePointFreeze() {
-        pointCalloutLabel.isHidden = true
-        flashNode.color = .white
         if pendingPointWin {
-            score += Config.scorePerOpponentLife * level
-            updateScoreHUD()
-            opponentLives -= 1
-            updateLivesHUD()
-            nextServer = .player   // you scored → you serve
+            nextServer = .player
             if opponentLives <= 0 {
-                levelUp()          // endless: there is no final level to win
+                levelUp()
             } else {
                 scheduleServe()
             }
         } else {
-            // Hearts are SPARE lives. Going 0 → -1 means you were on your last
-            // life and just lost it, so the run ends there (3 hearts = 4 misses).
-            playerLives -= 1
-            updateLivesHUD()
-            nextServer = .opponent // they scored → they serve
+            nextServer = .opponent
             if playerLives < 0 {
                 endRun()
             } else {
@@ -753,7 +901,7 @@ final class GameScene: SKScene {
         updateLevelHUD()
         updateLivesHUD()
         Haptics.shared.levelUp()
-        flashNode.run(flashAction, withKey: "flash")
+        Audio.shared.levelUp()
         transitionLabel.display("LEVEL \(level)")
         transitionLabel.isHidden = false
         ballNode.isHidden = true
@@ -957,6 +1105,7 @@ final class GameScene: SKScene {
                 score += Config.scorePerHit * level
                 updateScoreHUD()
                 Haptics.shared.paddleHit()
+                Audio.shared.paddleHit(player: true)
             } else {
                 // Miss: stop on the plane — no fly-through past the camera.
                 beginPointFreeze(playerScored: false, atX: xc, y: yc, z: 0)
@@ -974,6 +1123,7 @@ final class GameScene: SKScene {
                           paddleHalfH: Config.oppPaddleHalfH,
                           newZ: Config.zFar - 0.1, outbound: false)
                 Haptics.shared.paddleHit()
+                Audio.shared.paddleHit(player: false)
             } else {
                 beginPointFreeze(playerScored: true, atX: xc, y: yc, z: Config.zFar)
                 return
@@ -1014,60 +1164,51 @@ final class GameScene: SKScene {
 
     private func wallBounce() {
         Haptics.shared.wallBounce()
+        Audio.shared.wallBounce()
         pulseRing(atZ: bz)
     }
 
     private func pulseRing(atZ z: CGFloat) {
         let idx = CourtMath.ringIndex(z: z, zFar: Config.zFar, ringCount: Config.ringCount)
-        rings[idx].run(ringPulses[idx], withKey: "pulse")
+        guard idx >= 0, idx < rings.count else { return }
+        let ring = rings[idx]
+        ring.removeAction(forKey: "pulse")
+        ring.strokeColor = Config.wallNeonPink
+        ring.run(ringPulses[idx], withKey: "pulse")
     }
 
     // MARK: - Opponent AI
+    //
+    // Pure tracking, Flappy Bird style: chase the ball intercept as hard as
+    // aiSpeed allows. No aim error, no reaction delay, no corner hunting.
+    // Difficulty is ONLY "it gets faster" (Config.aiSpeedL1 → L10).
 
     private func stepAI(_ dt: CGFloat) {
-        // Between points / before serve: stay parked center (scheduleServe snaps too).
+        // Between points / before serve: park center.
         if !ballLive {
             ox = 0; oy = 0
-            ballWasOutbound = false
             return
         }
 
-        let outbound = vz > 0
+        let tx: CGFloat
+        let ty: CGFloat
+        let effW = halfW - Config.ballRadius
+        let effH = halfH - Config.ballRadius
 
-        // The moment the ball turns outbound, roll a fresh aim error and
-        // restart the reaction clock. The error shrinks with level; the
-        // imperfection is what makes the opponent beatable.
-        if outbound && !ballWasOutbound {
-            aiReactionClock = 0
-            let amp = aiErrorAmp()
-            aiErrX = CGFloat.random(in: -amp...amp)
-            aiErrY = CGFloat.random(in: -amp...amp)
-        }
-        ballWasOutbound = outbound
-
-        var tx: CGFloat = 0
-        var ty: CGFloat = 0
-        var speedFactor: CGFloat = aiIdleFactor()  // slow recentre when idle
-
-        if outbound {
-            aiReactionClock += dt
-            if aiReactionClock >= aiReactionDelay() {
-                // Project the ball to the far plane, folding wall bounces in,
-                // then aim at that intercept plus this approach's error.
-                let tHit = (Config.zFar - bz) / vz
-                let effW = halfW - Config.ballRadius
-                let effH = halfH - Config.ballRadius
-                tx = CourtMath.reflect(bx + vx * tHit, limit: effW) + aiErrX
-                ty = CourtMath.reflect(by + vy * tHit, limit: effH) + aiErrY
-                speedFactor = 1
-            } else {
-                // Still "reacting": hold position.
-                tx = ox; ty = oy
-                speedFactor = 0
-            }
+        if vz > 0.001 {
+            // Ball coming at the AI: track where it will cross the far plane
+            // (wall bounces folded in). Exact intercept — no offset.
+            let tHit = max(0, (Config.zFar - bz) / vz)
+            tx = CourtMath.reflect(bx + vx * tHit, limit: effW)
+            ty = CourtMath.reflect(by + vy * tHit, limit: effH)
+        } else {
+            // Ball going back to the player: keep tracking its XY so the
+            // paddle doesn't invent a fake recenter dodge.
+            tx = max(-effW, min(effW, bx))
+            ty = max(-effH, min(effH, by))
         }
 
-        let step = aiSpeed() * speedFactor * dt
+        let step = aiSpeed() * dt
         ox = CourtMath.moveToward(ox, target: tx, maxStep: step)
         oy = CourtMath.moveToward(oy, target: ty, maxStep: step)
 
@@ -1080,14 +1221,67 @@ final class GameScene: SKScene {
     // MARK: - Rendering (positions + one perspective scale; no allocations)
 
     private func renderWorld() {
-        playerPaddleNode.position = proj.project(x: px, y: py, z: 0)
-        oppPaddleNode.position = proj.project(x: ox, y: oy, z: Config.zFar)
-        // Far paddle must scale with perspective or it looks huge / dishonest.
-        oppPaddleNode.setScale(proj.scale(z: Config.zFar))
-        ballNode.position = proj.project(x: bx, y: by, z: bz)
-        // Perspective scale + slight draw boost so near/far size delta is readable.
-        ballNode.setScale(proj.scale(z: bz) * Config.ballDrawScale)
-        ballSpinLayer?.zRotation = ballSpin
+        // Pixel-snap every actor: continuous physics, discrete picture.
+        playerPaddleNode.position = Config.snapPoint(proj.project(x: px, y: py, z: 0))
+        oppPaddleNode.position = Config.snapPoint(proj.project(x: ox, y: oy, z: Config.zFar))
+        // Quantize far paddle scale to keep slab edges on-grid.
+        let oppS = proj.scale(z: Config.zFar)
+        oppPaddleNode.setScale(quantizeScale(oppS))
+
+        let ballScale = proj.scale(z: bz) * Config.ballDrawScale
+        ballNode.position = Config.snapPoint(proj.project(x: bx, y: by, z: bz))
+        ballNode.setScale(quantizeScale(ballScale))
+        // Spin ticks through discrete sprite frames.
+        let step = (2 * CGFloat.pi) / Config.ballSpinSteps
+        ballSpinLayer?.zRotation = (ballSpin / step).rounded() * step
+        ballNode.isHidden = (phase == .title || phase == .gameOver)
+
+        if ballShadowNode != nil {
+            let showShadow = !ballNode.isHidden && (ballLive || awaitingPlayerServe || pointFreezeCountdown > 0)
+            ballShadowNode.isHidden = !showShadow
+            if showShadow {
+                let heightFrac = max(0, min(1, (by + halfH) / max(2 * halfH, 1)))
+                // Two-step alpha only (near floor / high in court).
+                ballShadowNode.alpha = heightFrac > 0.55 ? Config.ballShadowAlpha * 0.4 : Config.ballShadowAlpha
+                ballShadowNode.position = Config.snapPoint(
+                    proj.project(x: bx, y: -halfH * 0.98, z: bz))
+                ballShadowNode.setScale(quantizeScale(ballScale))
+            }
+        }
+
+        if ballLive {
+            trailHistory.insert((bx, by, bz), at: 0)
+            if trailHistory.count > Config.trailLength {
+                trailHistory.removeLast(trailHistory.count - Config.trailLength)
+            }
+        } else {
+            trailHistory.removeAll(keepingCapacity: true)
+        }
+        for (i, ghost) in trailGhosts.enumerated() {
+            if i < trailHistory.count, ballLive {
+                let h = trailHistory[i]
+                let t = CGFloat(i) / CGFloat(max(Config.trailLength - 1, 1))
+                ghost.isHidden = false
+                ghost.position = Config.snapPoint(proj.project(x: h.x, y: h.y, z: h.z))
+                let s = proj.scale(z: h.z) * Config.ballDrawScale
+                    * NodeFactory.lerp(Config.trailScaleHead, Config.trailScaleTail, t)
+                ghost.setScale(quantizeScale(s))
+                // Stepped trail alpha (3 levels) rather than continuous fade.
+                let steps: [CGFloat] = [Config.trailAlphaHead, 0.35, 0.22, 0.15, Config.trailAlphaTail]
+                ghost.alpha = steps[min(i, steps.count - 1)]
+            } else {
+                ghost.isHidden = true
+            }
+        }
+
+    }
+
+    /// Keep perspective scale continuous enough to read depth, but bias toward
+    /// values that don't smear a 1-pixel stroke into half-pixels.
+    private func quantizeScale(_ s: CGFloat) -> CGFloat {
+        // 32 steps between 0 and 1 is plenty for GBC depth layers.
+        let steps: CGFloat = 32
+        return max(1 / steps, (s * steps).rounded() / steps)
     }
 
     // MARK: - Touch handling

@@ -2,8 +2,8 @@ import SpriteKit
 
 /// A 5×7 bitmap typeface defined entirely in code — no font file, no asset
 /// catalog. Every glyph is seven rows of five bits; a set bit is one square
-/// block. This is what carries the 8-bit read: real pixel construction rather
-/// than a smooth vector face pretending to be retro.
+/// block. Title style borrows r1.jpg (OVERDRIVE AVENUE): chrome cyan→pink
+/// fill with a magenta neon halo.
 enum PixelFont {
 
     static let cols = 5
@@ -63,7 +63,6 @@ enum PixelFont {
         "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
         "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
 
-        // Pixel heart — the life indicator.
         "♥": ["00000", "01010", "11111", "11111", "01110", "00100", "00000"],
         "·": ["00000", "00000", "00000", "00100", "00000", "00000", "00000"],
         ".": ["00000", "00000", "00000", "00000", "00000", "00100", "00100"],
@@ -75,41 +74,77 @@ enum PixelFont {
         "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
         "+": ["00000", "00100", "00100", "11111", "00100", "00100", "00000"],
         "'": ["00100", "00100", "00000", "00000", "00000", "00000", "00000"],
+        "|": ["00100", "00100", "00100", "00100", "00100", "00100", "00100"],
     ]
 }
 
-/// Draws `PixelFont` text as one filled path — a whole line of copy costs a
-/// single node and one draw call, so HUD updates stay cheap.
+/// Pixel text. HUD is flat; titles use r1-style chrome (top cyan / bottom pink)
+/// plus a magenta neon outline.
 final class PixelLabel: SKNode {
 
     enum HAlign { case left, center, right }
+    enum Style { case plain, chrome }
 
+    private let glowShape = SKShapeNode()
+    private let outlineShape = SKShapeNode()
+    private let shadowShape = SKShapeNode()
+    private let fillTop = SKShapeNode()
+    private let fillMid = SKShapeNode()
+    private let fillBot = SKShapeNode()
     private let shape = SKShapeNode()
     private var raw = ""
+    private var wantsShadow = false
+    private var style: Style = .plain
 
-    /// Edge length of one block, in points. Rounded to whole points so the
-    /// grid never lands on a half pixel and blurs.
-    private(set) var pixelSize: CGFloat = 2
-    /// Blank columns between glyphs, in blocks.
+    private(set) var pixelSize: CGFloat = 3
     var tracking: CGFloat = 1 { didSet { rebuild() } }
     var hAlign: HAlign = .center { didSet { rebuild() } }
 
     var tint: SKColor = .white {
-        didSet { shape.fillColor = tint; shape.strokeColor = .clear }
+        didSet {
+            if style == .plain {
+                shape.fillColor = tint
+                shape.strokeColor = .clear
+            }
+        }
     }
 
-    /// `height` is the cap height the text should occupy, so call sites can go
-    /// on thinking in points rather than blocks.
     static func make(_ text: String, height: CGFloat, color: SKColor,
-                     tracking: CGFloat = 1, align: HAlign = .center) -> PixelLabel {
+                     tracking: CGFloat = 1, align: HAlign = .center,
+                     shadow: Bool = false, style: Style = .plain) -> PixelLabel {
         let l = PixelLabel()
-        l.pixelSize = max(1, (height / CGFloat(PixelFont.rows)).rounded())
+        let rawPx = max(Config.pixel, (height / CGFloat(PixelFont.rows)))
+        l.pixelSize = Config.snap(rawPx)
+        if l.pixelSize < Config.pixel { l.pixelSize = Config.pixel }
         l.tracking = tracking
         l.hAlign = align
         l.raw = text
-        l.shape.strokeColor = .clear
-        l.shape.isAntialiased = false      // keep block edges hard
-        l.addChild(l.shape)
+        l.wantsShadow = shadow
+        l.style = style
+
+        for n in [l.glowShape, l.outlineShape, l.shadowShape,
+                  l.fillTop, l.fillMid, l.fillBot, l.shape] {
+            n.strokeColor = .clear
+            n.isAntialiased = false
+        }
+        l.glowShape.zPosition = -3
+        l.outlineShape.zPosition = -2
+        l.shadowShape.zPosition = -1
+        l.fillTop.zPosition = 0
+        l.fillMid.zPosition = 0
+        l.fillBot.zPosition = 0
+        l.shape.zPosition = 1
+
+        if style == .chrome {
+            l.addChild(l.glowShape)
+            l.addChild(l.outlineShape)
+            l.addChild(l.fillTop)
+            l.addChild(l.fillMid)
+            l.addChild(l.fillBot)
+        } else {
+            if shadow { l.addChild(l.shadowShape) }
+            l.addChild(l.shape)
+        }
         l.tint = color
         l.rebuild()
         return l
@@ -121,7 +156,6 @@ final class PixelLabel: SKNode {
         rebuild()
     }
 
-    /// Width of the current line in points — used for fitting copy to the frame.
     var contentWidth: CGFloat {
         let n = CGFloat(raw.count)
         guard n > 0 else { return 0 }
@@ -130,35 +164,89 @@ final class PixelLabel: SKNode {
     }
 
     private func rebuild() {
-        let path = CGMutablePath()
         let px = pixelSize
-        let glyphW = CGFloat(PixelFont.cols) * px
-        let advance = glyphW + tracking * px
         let total = contentWidth
-
         var originX: CGFloat
         switch hAlign {
         case .left:   originX = 0
         case .center: originX = -total / 2
         case .right:  originX = -total
         }
-        // Vertically centred on the node's origin.
         let top = CGFloat(PixelFont.rows) * px / 2
+        let midY = 0 as CGFloat  // vertical centre of label
 
+        let full = CGMutablePath()
+        let topPath = CGMutablePath()
+        let midPath = CGMutablePath()
+        let botPath = CGMutablePath()
+
+        var ox = originX
         for ch in raw.uppercased() {
             let bitmap = PixelFont.glyph(ch)
             for (r, bits) in bitmap.enumerated() {
                 for c in 0..<PixelFont.cols {
                     guard bits & (1 << (PixelFont.cols - 1 - c)) != 0 else { continue }
-                    path.addRect(CGRect(x: originX + CGFloat(c) * px,
-                                        y: top - CGFloat(r + 1) * px,
-                                        width: px, height: px))
+                    let rect = CGRect(x: ox + CGFloat(c) * px,
+                                      y: top - CGFloat(r + 1) * px,
+                                      width: px, height: px)
+                    full.addRect(rect)
+                    // 3-band chrome: bright pink → magenta → dark purple (top→bot).
+                    let band = CGFloat(r) / CGFloat(max(PixelFont.rows - 1, 1))
+                    if band < 0.34 {
+                        topPath.addRect(rect)
+                    } else if band < 0.67 {
+                        midPath.addRect(rect)
+                    } else {
+                        botPath.addRect(rect)
+                    }
                 }
             }
-            originX += advance
+            ox += CGFloat(PixelFont.cols) * px + tracking * px
         }
-        shape.path = path
-        shape.fillColor = tint
-        shape.strokeColor = .clear
+        _ = midY
+
+        if style == .chrome {
+            let glow = CGMutablePath()
+            let o = px * 0.50
+            for dx in [-o, 0, o] {
+                for dy in [-o, 0, o] {
+                    if dx == 0 && dy == 0 { continue }
+                    var t = CGAffineTransform(translationX: dx, y: dy)
+                    if let p = full.copy(using: &t) { glow.addPath(p) }
+                }
+            }
+            glowShape.path = glow
+            glowShape.fillColor = Config.titleNeonGlow.withAlphaComponent(0.30)
+
+            let rim = CGMutablePath()
+            let rOff = px * 0.28
+            for dx in [-rOff, 0, rOff] {
+                for dy in [-rOff, 0, rOff] {
+                    if dx == 0 && dy == 0 { continue }
+                    var t = CGAffineTransform(translationX: dx, y: dy)
+                    if let p = full.copy(using: &t) { rim.addPath(p) }
+                }
+            }
+            outlineShape.path = rim
+            outlineShape.fillColor = Config.titleNeonGlow.withAlphaComponent(0.50)
+
+            fillTop.path = topPath
+            fillTop.fillColor = Config.titleChromeTop
+            fillMid.path = midPath
+            fillMid.fillColor = Config.titleChromeMid
+            fillBot.path = botPath
+            fillBot.fillColor = Config.titleChromeBot
+            shape.path = nil
+        } else {
+            shape.path = full
+            shape.fillColor = tint
+            shape.strokeColor = .clear
+            if wantsShadow {
+                shadowShape.path = full
+                shadowShape.fillColor = Config.typeShadowColor
+                let off = Config.titleShadowBlocks * px
+                shadowShape.position = CGPoint(x: off, y: -off)
+            }
+        }
     }
 }

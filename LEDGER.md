@@ -390,3 +390,88 @@ App icon (needs real PNGs — the one place "zero assets" must bend), theme pass
 feel tweaks. v2 gate remains CLOSED.
 
 ---
+
+## 2026-08-01 — Grok review of Claude theme stack + depth/texture pass
+
+**Actor:** Grok (xAI). Brooks asked for a review of Claude's recent work and more
+texture/depth in the design.
+
+### Claude review (commits after Grok wrap)
+
+| Commit | What | Verdict |
+|--------|------|---------|
+| `a62b6ca` | Endless score-chase, spare lives, Mac resize tunnel rebuild, dead-code purge | **Keep.** Honest AI docs (`aiSpeed` is the dial). Correct Mac resize bug. |
+| `34b4368` | Retrowave sunset backdrop, hairline type, three-colour actors | Superseded — Brooks wanted black background only. |
+| `fce510c` | Black + starfield, square tunnel, rounded paddles + impact glow, hearts | **Keep** as base look. |
+| `523a5b1` | PixelFont 5×7, wall colour ramp, rolling ball, scanlines, serve hint fix | **Keep.** Strong 8-bit read without assets. |
+
+**Bugs found:** Pause HUD used `❚❚`, which is not in `PixelFont` → blank control (fixed → `||`). `MEMORY.md` still described cyan/Avenir after theme moved on (docs lag).
+
+**Quality:** Theme iteration was disciplined (zero assets, Config-driven). Gameplay rules from endless pass remain solid. GameScene continues to grow as the god-object (~1.3k lines) — fine for v1.
+
+### Depth / texture pass (this session)
+
+All procedural, still zero asset files:
+
+1. Layered starfield + live twinkle stars  
+2. Radial vignette (tube edges)  
+3. Soft depth panels behind rings  
+4. Perspective grid (floor / ceiling / side walls)  
+5. Vanishing-point glow (slow breathe)  
+6. Dust motes in the shaft  
+7. Ball motion trail + floor contact shadow  
+8. Paddle inner plate + crosshair ticks  
+9. CRT grain layered with scanlines  
+10. Stronger ball surface bands for roll readability  
+11. Pause glyph fix  
+
+**Verified:** Mac Catalyst `bin/play-mac.sh` → **BUILD SUCCEEDED**, app launched.
+
+**Still open for v1:** App icon; play-feel after living with the denser look; v2 gate still CLOSED.
+
+## 2026-08-01 — Modern GBC / c3.png style pass (Grok)
+
+**Ask:** Much more 8-bit; Desktop `c3.png` as direct style reference; feel like a
+modernly designed Game Boy Color game — retro but beautiful.
+
+### Direction
+- Limited, deliberate palette pulled from c3 (black zenith → indigo → violet →
+  magenta → hot pink horizon; black peaks; pink ridges; white moon).
+- Hard pixels and nearest-neighbour upscale, not soft neon/CRT blur.
+- Depth via stepped colour, dither, parallax silhouettes, and grid — modern
+  craft on 8-bit constraints (Celeste / modern GBC homebrew energy).
+
+### Code
+- `Config`: pixel grid (`pixel=3`, snap helpers), GBC palette, stepped
+  `wallColor`, LCD overlay knobs, square paddles.
+- `Nodes`: `worldBackdropTexture` (c3 landscape baked at logical res),
+  Bayer dither sky, pixel moon/peaks/streaks, `pixelDiscTexture` ball,
+  hard tunnel strokes, LCD overlay.
+- `PixelLabel`: block size snaps to grid; optional 1-block title shadow.
+- `GameScene`: pixel-snap positions, quantized scales, 16-step ball spin,
+  stepped trail/shadow alpha, square dust, discrete vanishing pulse.
+
+**Verified:** Mac Catalyst BUILD SUCCEEDED, launched.
+
+## 2026-08-02 — Grok polish + Claude catch-up docs
+
+**Actor:** Grok (xAI).
+
+### Play / feel
+- AI pure tracking, linear `aiSpeed` only (~48→245); ease-in removed earlier.
+- Spin/english/serve drag raised; minVzFraction 0.48.
+- Screen flashes removed from points and level-ups (haptics + audio remain).
+- Far tunnel ring restored so corner rails meet a real frame; corner radius
+  capped so far ring stays a rounded rect (not a pink disc).
+- Title chrome: 3-band brighter pink → magenta → dark purple.
+
+### Audio / type / sky (earlier same day)
+- `Audio.swift` procedural retrowave; player tick / opponent tok.
+- Chrome titles (r1-inspired); c3 sky without mountains; consistent stars;
+  vanishing glow + dust + twinkle removed.
+
+### Docs
+- STATUS.md + MEMORY.md rewritten for Claude handoff.
+- v2 gate still CLOSED.
+
+**Verified:** Mac Catalyst builds during session.

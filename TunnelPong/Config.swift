@@ -11,29 +11,60 @@ struct Config {
     static let zFar: CGFloat = 900
 
     // MARK: - Court (fractions of the screen at the near plane, z = 0)
-    static let courtWidthFactor: CGFloat = 0.92
-    static let courtHeightFactor: CGFloat = 0.72
+    // Near ring fills the view so the shaft reads continuous edge-to-edge.
+    static let courtWidthFactor: CGFloat = 1.02
+    static let courtHeightFactor: CGFloat = 0.95
+
+    // MARK: - Pixel grid (modern GBC)
+    //
+    // Everything snaps to this grid. Depth and motion stay continuous in
+    // physics; only the *picture* is discrete — that's the "beautiful 8-bit"
+    // trick (Celeste / modern GBC homebrew), not a blurry CRT filter.
+    /// Logical pixel size in points. 3 ≈ GBC-on-phone scale on modern screens.
+    static let pixel: CGFloat = 3
+    /// Snap a point-space value to the pixel grid.
+    static func snap(_ v: CGFloat) -> CGFloat {
+        (v / pixel).rounded() * pixel
+    }
+    static func snapPoint(_ p: CGPoint) -> CGPoint {
+        CGPoint(x: snap(p.x), y: snap(p.y))
+    }
+    /// Discrete spin steps so the ball "ticks" like sprite frames.
+    static let ballSpinSteps: CGFloat = 16
 
     // MARK: - Tunnel look
-    static let ringCount: Int = 13
-    /// 0 = hard square corners. The tunnel should read as cut, not extruded.
-    static let ringCornerRadius: CGFloat = 0
-    static let ringLineWidthNear: CGFloat = 2.0
-    static let ringLineWidthFar: CGFloat = 0.7
-    static let ringAlphaNear: CGFloat = 0.50
-    static let ringAlphaFar: CGFloat = 0.14
-    static let cornerLineAlpha: CGFloat = 0.22
+    // Transparent walls: only evenly spaced single strokes + corner rails.
+    // Evenly spaced depth rings (every-other of the denser lattice).
+    static let ringCount: Int = 9
+    /// Slight rounding, snapped to the pixel grid (see Nodes.ring).
+    static let ringCornerRadius: CGFloat = 9
+    /// 2pt hard stroke — thick enough to read as 8-bit, not a hairline.
+    static let ringLineWidthNear: CGFloat = 2
+    static let ringLineWidthFar: CGFloat = 2
+    /// Depth (z-axis) corner rails — thinner than depth rings.
+    static let railLineWidth: CGFloat = 1
+    static let ringAlphaNear: CGFloat = 0.88
+    /// Far rings stay open wireframe (low alpha), never a solid disc.
+    static let ringAlphaFar: CGFloat = 0.42
+    static let cornerLineAlpha: CGFloat = 0.90
+    /// Always draw the far-plane ring so corner rails meet a real end frame.
+    static let ringSkipFarPlane = false
+    /// Hit flash: ring pops to this colour then settles back to neon pink.
+    static let ringHitColor = SKColor(red: 1.00, green: 0.85, blue: 0.95, alpha: 1)
+    static let ringHitUp: CGFloat = 0.04
+    static let ringHitDown: CGFloat = 0.28
 
     // MARK: - Ball (constants that do not ramp)
     /// World-space radius (also base on-screen size at z = 0).
-    static let ballRadius: CGFloat = 26
+    static let ballRadius: CGFloat = 24
     /// Extra multiplier on rendered ball scale (physics radius unchanged).
-    static let ballDrawScale: CGFloat = 1.08
+    static let ballDrawScale: CGFloat = 1.0
     /// Extra english when the paddle *corner* is on the ball at serve (0–1 scale).
-    static let serveCornerBoost: CGFloat = 0.40
+    static let serveCornerBoost: CGFloat = 0.55
     /// Minimum share of total speed kept along z, so the ball can't stall
-    /// bouncing sideways after heavy english.
-    static let minVzFraction: CGFloat = 0.55
+    /// bouncing sideways after heavy english. Slightly lower = more lateral room
+    /// for spin to read without killing depth travel.
+    static let minVzFraction: CGFloat = 0.48
     /// Absolute ceiling (safety). L10 endpoints stay under this.
     static let ballMaxSpeed: CGFloat = 1200
     /// Where opponent auto-serves spawn, as a fraction of zFar.
@@ -88,34 +119,22 @@ struct Config {
     // Per-hit rally add within a point
     static let rallyIncL1: CGFloat = 5
     static let rallyIncL10: CGFloat = 16
-    // Off-center english / spin bite
-    static let englishL1: CGFloat = 0.22
-    static let englishL10: CGFloat = 0.42
-    // Serve drag spin magnitude
-    static let serveDragL1: CGFloat = 180
-    static let serveDragL10: CGFloat = 340
+    // Off-center english / spin bite (stronger so contact placement reads).
+    static let englishL1: CGFloat = 0.38
+    static let englishL10: CGFloat = 0.62
+    // Serve drag spin magnitude (drag-to-meet should clearly steer the ball).
+    static let serveDragL1: CGFloat = 320
+    static let serveDragL10: CGFloat = 560
 
-    // AI paddle move speed. THIS is the dial that actually governs AI reach —
-    // at current numbers it is always the binding constraint (95→500 sits well
-    // under the lateral ceiling below at every level). Tune these.
-    static let aiSpeedL1: CGFloat = 95
-    static let aiSpeedL10: CGFloat = 500
-    /// Safety ceiling only: caps AI XY at a fraction of the ball's max lateral
-    /// speed so the opponent can never be mathematically un-passable. Inert at
-    /// the aiSpeed values above (never binds) — it exists so that raising
-    /// aiSpeedL10 later can't accidentally create an unbeatable wall.
-    /// Kept below 1.0 on purpose: the ball must always be able to out-run it.
-    static let aiLateralFracL1: CGFloat = 0.42
-    static let aiLateralFracL10: CGFloat = 0.94
-    // Aim error (world units). High early → sparse late.
-    static let aiErrorL1: CGFloat = 110
-    static let aiErrorL10: CGFloat = 12
-    // Reaction delay after ball turns outbound (seconds)
-    static let aiReactionL1: CGFloat = 0.58
-    static let aiReactionL10: CGFloat = 0.10
-    // Idle recentre rate while ball is inbound
-    static let aiIdleL1: CGFloat = 0.22
-    static let aiIdleL10: CGFloat = 0.55
+    // AI: pure ball tracking. Difficulty = linear tracking speed only.
+    //   L1  — slow enough that casual angles score freely
+    //   L10 — hard but beatable with strong English / corners
+    // 2026-08-02: raised ×2 after mid/late still too easy (base was 48→245).
+    static let aiSpeedL1: CGFloat = 96
+    static let aiSpeedL10: CGFloat = 490
+    /// Safety ceiling only — not a skill dial.
+    static let aiLateralFracL1: CGFloat = 0.35
+    static let aiLateralFracL10: CGFloat = 0.72
 
     // MARK: - Rules
     //
@@ -138,60 +157,79 @@ struct Config {
     static let levelTransitionDuration: CGFloat = 1.4
 
     // MARK: - Layout / safe area
-    /// Extra pad below the safe-area top (notch / Dynamic Island / Mac titlebar).
-    static let hudTopPad: CGFloat = 14
-    static let hudBottomPad: CGFloat = 14
+    /// Pad under the Dynamic Island / safe top for level + score (hearts sit higher).
+    static let hudTopPad: CGFloat = 6
+    static let hudBottomPad: CGFloat = 10
     /// Mac Catalyst titlebar eats the top of the content view; treat as min top inset.
     static let macTitlebarInset: CGFloat = 40
+    /// Vertical gap between LV and score under the island.
+    static let hudScoreGap: CGFloat = 20
 
-    // MARK: - Type (procedural 5×7 pixel font — see PixelFont.swift)
-    /// Blank columns between glyphs, in blocks. Wider reads more deliberate.
-    static let titleTracking: CGFloat = 2
-    static let hudTracking: CGFloat = 1.6
+    // MARK: - Type (procedural 5×7 pixel font — r1 chrome/neon title style)
+    /// Blank columns between glyphs, in blocks. Tight like OVERDRIVE lettering.
+    static let titleTracking: CGFloat = 0.5
+    static let hudTracking: CGFloat = 1
+    /// Drop-shadow offset in blocks (classic 8-bit title depth).
+    static let titleShadowBlocks: CGFloat = 1
+    /// Title chrome: pink (top) → mid magenta-cyan → cyan (bottom).
+    static let titleChromeTop = SKColor(red: 1.00, green: 0.42, blue: 0.68, alpha: 1)
+    static let titleChromeMid = SKColor(red: 0.72, green: 0.55, blue: 0.95, alpha: 1)
+    static let titleChromeBot = SKColor(red: 0.35, green: 0.92, blue: 1.00, alpha: 1)
+    static let titleNeonGlow  = SKColor(red: 0.55, green: 0.35, blue: 0.85, alpha: 1)
 
-    // MARK: - Retrowave palette
+    // MARK: - GBC palette (from Desktop/c3.png, quantized for modern Game Boy Color)
     //
-    // Reference: black sky falling through indigo → violet → magenta to a hot
-    // pink horizon, near-black silhouettes, one white moon. Screen stays
-    // majority black. Only THREE things carry color, so the eye never hunts:
-    //   you = white · opponent = magenta · ball = neon orange.
+    // c3: black zenith → indigo → violet → magenta → hot pink horizon,
+    // black peak silhouettes with pink ridges, white crescent. Actors use
+    // a tiny set so the eye never hunts — GBC-style discipline, modern taste.
 
-    /// You — moon white, faintly lavender. Always the brightest thing near you.
-    static let playerColor   = SKColor(red: 0.94, green: 0.92, blue: 1.00, alpha: 1)
-    /// AI — hot magenta, sitting far down the tunnel against deep violet.
-    static let opponentColor = SKColor(red: 1.00, green: 0.18, blue: 0.49, alpha: 1)
-    /// Ball — neon orange. The one warm object in a cool frame.
-    static let ballColor     = SKColor(red: 1.00, green: 0.48, blue: 0.09, alpha: 1)
-    static let ballStrokeColor = SKColor(red: 1.00, green: 0.72, blue: 0.24, alpha: 1)
-    static let ballCoreColor = SKColor(red: 1.00, green: 0.88, blue: 0.62, alpha: 1)
-    /// Tunnel wire — violet, dim, never competing with the three actors.
-    static let ringColor     = SKColor(red: 0.62, green: 0.36, blue: 0.98, alpha: 1)
-    /// HUD text — soft lavender white.
-    static let hudColor      = SKColor(red: 0.86, green: 0.80, blue: 0.96, alpha: 1)
-    /// Title accent / hot pink horizon line.
-    static let titleAccent   = SKColor(red: 1.00, green: 0.36, blue: 0.55, alpha: 1)
+    /// You — cyan blue (paddle + hearts).
+    static let playerColor   = SKColor(red: 0.20, green: 0.92, blue: 1.00, alpha: 1)
+    /// AI — hot magenta (c3 ridge / horizon).
+    static let opponentColor = SKColor(red: 1.00, green: 0.22, blue: 0.52, alpha: 1)
+    /// Ball — warm peach-orange (one warm note in a cool frame).
+    static let ballColor     = SKColor(red: 1.00, green: 0.55, blue: 0.18, alpha: 1)
+    static let ballStrokeColor = SKColor(red: 1.00, green: 0.82, blue: 0.40, alpha: 1)
+    static let ballCoreColor = SKColor(red: 1.00, green: 0.94, blue: 0.72, alpha: 1)
+    static let ballShadeColor = SKColor(red: 0.72, green: 0.22, blue: 0.12, alpha: 1)
+    /// HUD text — pale lavender (readable on pink sky).
+    static let hudColor      = SKColor(red: 0.90, green: 0.86, blue: 0.98, alpha: 1)
+    /// Title accent — c3 horizon pink.
+    static let titleAccent   = SKColor(red: 1.00, green: 0.32, blue: 0.55, alpha: 1)
+    /// Shadow under pixel type.
+    static let typeShadowColor = SKColor(red: 0.08, green: 0.02, blue: 0.14, alpha: 1)
 
-    // MARK: - Tunnel gradient
-    //
-    // The wireframe runs a colour ramp down its length, echoing the reference
-    // sunset: hot pink where the wall is closest, falling through magenta and
-    // violet to deep indigo at the vanishing point. Depth reads as colour, not
-    // just as fade.
-    static let wallNear = SKColor(red: 1.00, green: 0.40, blue: 0.52, alpha: 1)
-    static let wallMid1 = SKColor(red: 0.91, green: 0.26, blue: 0.55, alpha: 1)
-    static let wallMid2 = SKColor(red: 0.58, green: 0.22, blue: 0.72, alpha: 1)
-    static let wallMid3 = SKColor(red: 0.34, green: 0.16, blue: 0.62, alpha: 1)
-    static let wallFar  = SKColor(red: 0.16, green: 0.09, blue: 0.38, alpha: 1)
+    // MARK: - Sky bands (top → bottom). Mostly black + purple; pink only a
+    // faint sliver at the very bottom (lowered vs earlier passes).
+    static let sky0 = SKColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)  // black
+    static let sky1 = SKColor(red: 0.01, green: 0.00, blue: 0.03, alpha: 1)  // near-black
+    static let sky2 = SKColor(red: 0.05, green: 0.02, blue: 0.12, alpha: 1)  // deep indigo
+    static let sky3 = SKColor(red: 0.10, green: 0.03, blue: 0.20, alpha: 1)  // dark purple
+    static let sky4 = SKColor(red: 0.16, green: 0.05, blue: 0.28, alpha: 1)  // purple
+    static let sky5 = SKColor(red: 0.22, green: 0.06, blue: 0.34, alpha: 1)  // mid purple
+    static let sky6 = SKColor(red: 0.30, green: 0.08, blue: 0.40, alpha: 1)  // violet
+    static let sky7 = SKColor(red: 0.42, green: 0.10, blue: 0.42, alpha: 1)  // purple-magenta
+    static let sky8 = SKColor(red: 0.72, green: 0.18, blue: 0.48, alpha: 1)  // muted rose (thin base)
+    static let groundColor = SKColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)
+    static let moonColor = SKColor(red: 0.96, green: 0.96, blue: 1.00, alpha: 1)
+    static let ridgeColor = SKColor(red: 1.00, green: 0.35, blue: 0.55, alpha: 1)
+    static let streakColor = SKColor(red: 1.00, green: 0.40, blue: 0.62, alpha: 1)
 
-    /// Colour of the tunnel wall at depth `t` (0 = near plane, 1 = far).
+    // MARK: - Tunnel wire — one neon pink for every spaced line
+    static let wallNeonPink = SKColor(red: 1.00, green: 0.28, blue: 0.58, alpha: 1)
+    static let wallNear = wallNeonPink
+    static let wallMid1 = wallNeonPink
+    static let wallMid2 = wallNeonPink
+    static let wallMid3 = wallNeonPink
+    static let wallFar  = wallNeonPink
+
+    /// Every tunnel stroke is the same neon pink (depth is spacing, not colour).
     static func wallColor(_ t: CGFloat) -> SKColor {
-        let stops = [wallNear, wallMid1, wallMid2, wallMid3, wallFar]
-        let clamped = max(0, min(1, t))
-        let scaled = clamped * CGFloat(stops.count - 1)
-        let i = min(Int(scaled), stops.count - 2)
-        return blend(stops[i], stops[i + 1], scaled - CGFloat(i))
+        _ = t
+        return wallNeonPink
     }
 
+    /// Soft blend only for baked sky bands (still quantized by band height).
     static func blend(_ a: SKColor, _ b: SKColor, _ t: CGFloat) -> SKColor {
         var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
         var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
@@ -201,36 +239,60 @@ struct Config {
                        blue: ab + (bb - ab) * t, alpha: aa + (ba - aa) * t)
     }
 
-    // MARK: - CRT scanlines
-    /// Horizontal line overlay. Subtle texture, not a gimmick — keep it low.
-    static let scanlineAlpha: CGFloat = 0.16
-    /// Points between lines (line is 1pt of that span).
-    static let scanlineSpacing: CGFloat = 3
+    // MARK: - LCD / scan presentation (modern handheld, not CRT dirt)
+    /// Darken every other logical-pixel row slightly (GBC LCD feel).
+    static let lcdRowAlpha: CGFloat = 0.10
+    /// Thin grid lines between logical pixels.
+    static let lcdGridAlpha: CGFloat = 0.06
 
     // MARK: - Ball spin
-    /// Radians of roll per point of lateral travel, scaled. Higher = spinnier.
-    static let ballSpinFactor: CGFloat = 0.85
+    static let ballSpinFactor: CGFloat = 0.95
 
-    // MARK: - Starfield
-    //
-    // The background is pure black. The only thing in it is a scatter of
-    // distant white stars — texture, never colour.
-    static let starCount = 110
-    static let starMinRadius: CGFloat = 0.5
-    static let starMaxRadius: CGFloat = 1.5
-    static let starMinAlpha: CGFloat = 0.18
-    static let starMaxAlpha: CGFloat = 0.85
-    static let starColor = SKColor.white
+    // MARK: - Starfield (deterministic seed → same sky every launch)
+    /// Sparse 1px stars across the whole gradient (not only the top).
+    static let starCount = 72
 
-    // MARK: - Impact glow
-    /// Paddles are hairline rects that bloom when the ball strikes them.
-    static let paddleCornerRadius: CGFloat = 14
-    /// Halo thickness on the glow layer that sits under each paddle.
-    static let paddleGlowWidth: CGFloat = 18
+    // MARK: - Depth atmosphere (simplified)
+    /// Mild edge darken only — sky already carries most of the mood.
+    static let vignetteAlpha: CGFloat = 0.22
+    /// Walls stay transparent — no filled panels.
+    static let panelAlphaNear: CGFloat = 0
+    static let panelAlphaFar: CGFloat = 0
+    /// Extra face grid off — rings + corner rails are the continuous lattice.
+    static let gridDepthLines = 0
+    static let gridLongLines = 0
+    static let gridAlphaNear: CGFloat = 0.55
+    static let gridAlphaFar: CGFloat = 0.35
+    static let gridLineWidthNear: CGFloat = 2
+    static let gridLineWidthFar: CGFloat = 2
+    /// Dust / vanishing glow removed — they read as noise vs the clean r1 look.
+    static let dustCount = 0
+
+    // MARK: - Audio (procedural, zero assets)
+    static let audioMaster: Float = 0.55
+    static let audioSFX: Float = 0.85
+    static let audioAmbient: Float = 0.12
+
+    // MARK: - Ball trail + contact shadow (hard steps, not soft fade)
+    static let trailLength = 5
+    static let trailAlphaHead: CGFloat = 0.55
+    static let trailAlphaTail: CGFloat = 0.12
+    static let trailScaleHead: CGFloat = 1.0
+    static let trailScaleTail: CGFloat = 0.55
+    static let ballShadowAlpha: CGFloat = 0.45
+    static let ballShadowYScale: CGFloat = 0.35
+    static let ballShadowXScale: CGFloat = 1.2
+
+    // MARK: - Paddle (solid slabs, lightly rounded)
+    static let paddleCornerRadius: CGFloat = 10
+    /// Impact flash is a second solid border + brief fill brighten.
+    static let paddleGlowWidth: CGFloat = 0
     static let paddleGlowLineWidth: CGFloat = 4
-    /// Rise and fall of the strike bloom, seconds.
-    static let paddleGlowUp: CGFloat = 0.05
-    static let paddleGlowDown: CGFloat = 0.28
-    /// How far the halo swells past the paddle at peak.
-    static let paddleGlowScale: CGFloat = 1.10
+    static let paddleGlowUp: CGFloat = 0.035
+    static let paddleGlowDown: CGFloat = 0.16
+    static let paddleGlowScale: CGFloat = 1.06
+    static let paddleFillAlpha: CGFloat = 0.22
+    /// Fill alpha at peak of a hit flash (rest is paddleFillAlpha).
+    static let paddleHitFillAlpha: CGFloat = 0.55
+    static let paddleInnerInset: CGFloat = 6
 }
