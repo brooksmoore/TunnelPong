@@ -174,9 +174,10 @@ enum NodeFactory {
                      t: CGFloat, center: CGPoint) -> SKShapeNode {
         let w = snap(halfW * scale)
         let h = snap(halfH * scale)
-        // Cap corner radius so the far ring stays a rounded *rect*, not a pink disc.
-        let rRaw = Config.ringCornerRadius * scale
-        let r = snap(min(max(Config.pixel, rRaw), min(w, h) * 0.22))
+        // iPhone-style corner: a fixed fraction of court width, shrinking with
+        // depth. Capped so the far ring stays a rounded *rect*, not a pink disc.
+        let rRaw = Config.ringCornerFrac * (halfW * 2) * scale
+        let r = snap(min(max(Config.pixel, rRaw), min(w, h) * Config.ringCornerCap))
         let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
         let node = SKShapeNode(rect: rect, cornerRadius: r)
         node.position = center
@@ -196,9 +197,10 @@ enum NodeFactory {
         // Transparent walls — panel exists only so rebuild paths stay valid.
         let w = snap(halfW * scale)
         let h = snap(halfH * scale)
-        let r = max(0, Config.ringCornerRadius * scale)
+        let r = min(Config.ringCornerFrac * (halfW * 2) * scale,
+                    min(w, h) * Config.ringCornerCap)
         let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
-        let node = SKShapeNode(rect: rect, cornerRadius: r)
+        let node = SKShapeNode(rect: rect, cornerRadius: max(0, r))
         node.position = center
         node.fillColor = .clear
         node.strokeColor = .clear

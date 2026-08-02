@@ -11,9 +11,15 @@ struct Config {
     static let zFar: CGFloat = 900
 
     // MARK: - Court (fractions of the screen at the near plane, z = 0)
-    // Near ring fills the view so the shaft reads continuous edge-to-edge.
+    // Near ring fills the view horizontally so the shaft reads edge-to-edge.
     static let courtWidthFactor: CGFloat = 1.02
-    static let courtHeightFactor: CGFloat = 0.95
+    /// Share of the *safe* vertical band the court occupies. The band is
+    /// measured between the safe-area top and bottom (see applyChromeLayout),
+    /// so the top wall always clears the notch / Dynamic Island.
+    static let courtHeightFactor: CGFloat = 1.0
+    /// Gap between the safe-area top and the court's top wall.
+    static let courtTopPad: CGFloat = 12
+    static let courtBottomPad: CGFloat = 8
 
     // MARK: - Pixel grid (modern GBC)
     //
@@ -36,8 +42,13 @@ struct Config {
     // Transparent walls: only evenly spaced single strokes + corner rails.
     // Evenly spaced depth rings (every-other of the denser lattice).
     static let ringCount: Int = 9
-    /// Slight rounding, snapped to the pixel grid (see Nodes.ring).
-    static let ringCornerRadius: CGFloat = 9
+    /// Corner radius as a fraction of court width, matched to the iPhone's own
+    /// screen corner (~0.125 of width ≈ 55pt on a 440pt display) so the tunnel
+    /// mouth echoes the device it's running on.
+    static let ringCornerFrac: CGFloat = 0.125
+    /// Ceiling as a share of the ring's smaller half-dimension — keeps distant
+    /// rings rounded rects instead of collapsing them into discs.
+    static let ringCornerCap: CGFloat = 0.32
     /// 2pt hard stroke — thick enough to read as 8-bit, not a hairline.
     static let ringLineWidthNear: CGFloat = 2
     static let ringLineWidthFar: CGFloat = 2
@@ -80,7 +91,10 @@ struct Config {
     static let playerPaddleHalfW: CGFloat = 72
     static let playerPaddleHalfH: CGFloat = 52
     static let paddleHitSlop: CGFloat = 14
-    static let touchOffsetY: CGFloat = 95
+    /// iOS relative-drag amplification. The paddle moves this many times
+    /// further than your thumb, so the whole court is reachable one-handed
+    /// without stretching. 1.0 would be literal 1:1 dragging.
+    static let touchGain: CGFloat = 2.3
 
     // MARK: - Opponent size (fixed; skill ramps below)
     static let oppPaddleHalfW: CGFloat = 48
@@ -164,6 +178,9 @@ struct Config {
     static let macTitlebarInset: CGFloat = 40
     /// Vertical gap between LV and score under the island.
     static let hudScoreGap: CGFloat = 20
+    /// Drop from the court's top wall down to the LV readout, so the HUD sits
+    /// inside the tunnel rather than on the wall line.
+    static let hudTopGap: CGFloat = 22
 
     // MARK: - Type (procedural 5×7 pixel font — r1 chrome/neon title style)
     /// Blank columns between glyphs, in blocks. Tight like OVERDRIVE lettering.

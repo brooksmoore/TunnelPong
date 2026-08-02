@@ -540,3 +540,59 @@ home-indicator gesture strip.
 deployment target is iOS 17, which excludes iPhone X/8 (they cap at iOS 16).
 
 ---
+
+## 2026-08-02 — Claude: iOS corners, Island clearance, elastic thumb trackpad
+
+**Actor:** Claude (Opus 5), at Brooks's request after playing on device.
+
+### 1. Tunnel corners match the device
+
+`ringCornerRadius` (a flat 9pt) replaced by `ringCornerFrac` = 0.125 of court
+width — the same proportion iPhone uses for its own screen corner (~55pt on a
+440pt display) — scaled by depth so distant rings round less. `ringCornerCap`
+(0.32 of the ring's smaller half-dimension) stops far rings collapsing into
+discs. Applied in `NodeFactory.ring`, `depthPanel`, and `rebuildTunnelGeometry`
+so all three stay in agreement.
+
+### 2. Top wall no longer crosses the Dynamic Island
+
+The court was sized off the raw screen (`height/2 * 0.95`), putting the near
+ring's top edge ~24pt from the top — straight through the Island.
+
+Court geometry is now derived from the **safe vertical band**: top wall at
+`height - safeTop - courtTopPad`, bottom at `safeBottom + courtBottomPad`, with
+the vanishing point at the band's centre. The top wall clears the Island on any
+device, and the fix generalises to every notch rather than hard-coding one.
+
+Knock-on: LV/score previously sat at `height - safeTop - 6`, which would now
+land *on* the wall line. They hang from the wall instead (`courtTopY -
+hudTopGap`), inside the tunnel. Hearts stay in the Island ear band.
+
+### 3. Elastic trackpad (iOS only)
+
+Absolute touch-to-paddle mapping meant covering a 6.9" court required stretching
+the thumb off the grip. The phone now treats the finger as a **relative
+trackpad**: press anywhere to set an origin, and the paddle travels
+`touchGain` (2.3) × further than the thumb. The whole court is reachable with a
+short swipe from a natural grip, anywhere on the glass.
+
+**Elastic re-anchor:** when the paddle is pinned against a wall, the origin
+moves to the thumb's current position. Without it the thumb accumulates "debt"
+past the edge and the paddle sits dead until you drag all the way back — the
+standard relative-control failure.
+
+Knock-on: steering *is* dragging now, so the old mid-drag serve would fire the
+instant the paddle crossed the ball. Serve moved to **lift** (touchesEnded,
+which already handled it); iOS hint reads "LIFT TO SERVE". Drag direction at
+release still supplies serve spin. Mac is untouched — hover still maps absolute.
+
+`Config.touchOffsetY` (the thumb-occlusion offset) is now dead and removed;
+relative control has no occlusion problem, since the paddle isn't under the
+finger.
+
+### Verified
+
+iOS device Debug **BUILD SUCCEEDED**, signed, and installed on BCM 16 Pro Max
+via `devicectl`.
+
+---

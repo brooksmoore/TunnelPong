@@ -27,6 +27,8 @@ final class GameScene: SKScene {
     private var proj = Projector(focal: Config.focal, center: .zero)
     private var halfW: CGFloat = 0   // court half-width at z = 0, in points
     private var halfH: CGFloat = 0
+    /// Screen y of the court's top wall — HUD hangs below this.
+    private var courtTopY: CGFloat = 0
 
     // MARK: - Run state
 
@@ -124,9 +126,16 @@ final class GameScene: SKScene {
 
     override func didMove(to view: SKView) {
         backgroundColor = .black
-        proj.center = CGPoint(x: size.width / 2, y: size.height / 2)
+        // Court is fitted to the SAFE vertical band, not the raw screen, so the
+        // top wall always passes below the notch / Dynamic Island instead of
+        // being sliced by it. The vanishing point sits at the band's centre.
+        let topSafe = max(safeInsets.top, 0)
+        let botSafe = max(safeInsets.bottom, 0)
+        courtTopY = size.height - topSafe - Config.courtTopPad
+        let courtBottomY = botSafe + Config.courtBottomPad
+        proj.center = CGPoint(x: size.width / 2, y: (courtTopY + courtBottomY) / 2)
         halfW = size.width / 2 * Config.courtWidthFactor
-        halfH = size.height / 2 * Config.courtHeightFactor
+        halfH = (courtTopY - courtBottomY) / 2 * Config.courtHeightFactor
 
         backdropNode.zPosition = -100
         addChild(backdropNode)
@@ -159,9 +168,16 @@ final class GameScene: SKScene {
     /// Call after safeInsets or size change (Mac resize, notch, titlebar).
     /// Court geometry stays screen-centered; only chrome (HUD / title) moves into the safe band.
     func applyChromeLayout() {
-        proj.center = CGPoint(x: size.width / 2, y: size.height / 2)
+        // Court is fitted to the SAFE vertical band, not the raw screen, so the
+        // top wall always passes below the notch / Dynamic Island instead of
+        // being sliced by it. The vanishing point sits at the band's centre.
+        let topSafe = max(safeInsets.top, 0)
+        let botSafe = max(safeInsets.bottom, 0)
+        courtTopY = size.height - topSafe - Config.courtTopPad
+        let courtBottomY = botSafe + Config.courtBottomPad
+        proj.center = CGPoint(x: size.width / 2, y: (courtTopY + courtBottomY) / 2)
         halfW = size.width / 2 * Config.courtWidthFactor
-        halfH = size.height / 2 * Config.courtHeightFactor
+        halfH = (courtTopY - courtBottomY) / 2 * Config.courtHeightFactor
         // halfW/halfH ARE the ball's walls, so the drawn tunnel has to be
         // rebuilt from them — repositioning alone would leave the wireframe
         // describing the old court after a Mac window resize.
@@ -221,8 +237,10 @@ final class GameScene: SKScene {
             let t = CourtMath.ringT(index: i, ringCount: Config.ringCount)
             let s = proj.scale(z: Config.zFar * t)
             let w = halfW * s, h = halfH * s
-            // Keep far ring rectangular (not a disc) so rails meet a clean frame.
-            let r = min(Config.ringCornerRadius * s, min(w, h) * 0.22)
+            // Matches NodeFactory.ring: iPhone-proportioned corner, capped so
+            // the far ring stays a rect rather than collapsing to a disc.
+            let r = min(Config.ringCornerFrac * (halfW * 2) * s,
+                        min(w, h) * Config.ringCornerCap)
             let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
             node.path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
             node.position = proj.center
@@ -331,7 +349,9 @@ final class GameScene: SKScene {
         let heartsY: CGFloat = topSafe >= 44
             ? size.height - topSafe * 0.48
             : size.height - topSafe - 12
-        let chromeY = size.height - topSafe - Config.hudTopPad
+        // Sit inside the tunnel, below the top wall, so neither the readout
+        // nor the wall line collides with the island.
+        let chromeY = courtTopY - Config.hudTopGap
 
         hudPlayerLives.position = CGPoint(x: sidePad, y: heartsY)
         hudOppLives.position = CGPoint(x: size.width - sidePad, y: heartsY)
@@ -729,7 +749,7 @@ final class GameScene: SKScene {
             #if targetEnvironment(macCatalyst)
             serveHintLabel.display("CLICK TO SERVE")
             #else
-            serveHintLabel.display("SWIPE TO SERVE")
+            serveHintLabel.display("LIFT TO SERVE")
             #endif
             serveReadyShown = nil
             serveHintLabel.isHidden = false
@@ -1036,24 +1056,66 @@ final class GameScene: SKScene {
         py = max(-my, min(my, py))
     }
 
-    private func setTouchTarget(_ loc: CGPoint, thumbOffset: Bool = true) {
-        // Screen → world at z = 0 is a straight offset from center (scale = 1).
-        // On phone, add occlusion offset so the paddle rides above the thumb.
-        // On Mac pointer, skip that so the paddle sits under the cursor.
+    /// Absolute mapping — Mac pointer only. Screen → world at z = 0 is a
+    /// straight offset from centre (scale = 1), so the paddle sits under the
+    /// cursor.
+    private func setTouchTarget(_ loc: CGPoint) {
         let wx = loc.x - proj.center.x
-        let offset: CGFloat = thumbOffset ? Config.touchOffsetY : 0
-        let wy = loc.y - proj.center.y + offset
+        let wy = loc.y - proj.center.y
         touchTarget = CGPoint(x: wx, y: wy)
-        // Apply immediately so click frames don't fight hover.
         px = wx
         py = wy
         clampPlayer()
     }
 
+    // MARK: - Touch: elastic trackpad (iOS)
+    //
+    // The phone does NOT map the paddle to the absolute touch point. Reaching
+    // the far corners of a 6.9" screen one-handed means stretching your thumb
+    // off the grip. Instead the finger works like a trackpad: wherever you
+    // press becomes the origin, and the paddle moves `touchGain`× further than
+    // your thumb does, so the whole court is covered by a short, comfortable
+    // swipe anywhere on the glass.
+
+    /// Where the current drag started, and where the paddle was at that moment.
+    private var dragAnchorScreen: CGPoint?
+    private var dragAnchorPaddle: CGPoint = .zero
+
+    private func beginRelativeDrag(at loc: CGPoint) {
+        dragAnchorScreen = loc
+        dragAnchorPaddle = CGPoint(x: px, y: py)
+        touchTarget = dragAnchorPaddle          // hold still until the thumb moves
+    }
+
+    private func updateRelativeDrag(to loc: CGPoint) {
+        guard let anchor = dragAnchorScreen else { return }
+        let g = Config.touchGain
+        let wantX = dragAnchorPaddle.x + (loc.x - anchor.x) * g
+        let wantY = dragAnchorPaddle.y + (loc.y - anchor.y) * g
+
+        let mx = halfW - Config.playerPaddleHalfW
+        let my = halfH - Config.playerPaddleHalfH
+        let clampedX = max(-mx, min(mx, wantX))
+        let clampedY = max(-my, min(my, wantY))
+
+        // Elastic re-anchor: if the paddle is pinned against a wall, move the
+        // origin to the thumb's current spot. Without this the thumb builds up
+        // "debt" past the edge and the paddle sits dead until you drag all the
+        // way back — the classic relative-control trap.
+        if clampedX != wantX || clampedY != wantY {
+            dragAnchorScreen = loc
+            dragAnchorPaddle = CGPoint(x: clampedX, y: clampedY)
+        }
+
+        touchTarget = CGPoint(x: clampedX, y: clampedY)
+        px = clampedX
+        py = clampedY
+    }
+
     /// Mac Catalyst: paddle follows the mouse with no click held.
     func pointerMoved(to loc: CGPoint) {
         guard phase == .playing || phase == .levelTransition else { return }
-        setTouchTarget(loc, thumbOffset: false)
+        setTouchTarget(loc)
     }
 
     // MARK: - Ball
@@ -1322,18 +1384,18 @@ final class GameScene: SKScene {
                 #if targetEnvironment(macCatalyst)
                 // Do not setTouchTarget — that was jumping the paddle to the click.
                 #else
-                setTouchTarget(loc)
+                beginRelativeDrag(at: loc)
                 #endif
                 return
             }
             #if targetEnvironment(macCatalyst)
             // Hover owns aim on Mac; clicks are for serve / UI only.
             #else
-            setTouchTarget(loc)
+            beginRelativeDrag(at: loc)
             #endif
         case .levelTransition:
             #if !targetEnvironment(macCatalyst)
-            setTouchTarget(loc)
+            beginRelativeDrag(at: loc)
             #endif
         }
     }
@@ -1349,17 +1411,15 @@ final class GameScene: SKScene {
             }
             serveDragPrev = loc
             #if !targetEnvironment(macCatalyst)
-            setTouchTarget(loc)
-            // Phone: swipe while paddle covers ball → serve with spin.
-            if paddleOverlapsServeBall(), hypot(serveDragDelta.x, serveDragDelta.y) > 8 {
-                launchPlayerServe(dragScreen: serveDragDelta)
-            }
+            // Steering the paddle IS dragging now, so firing mid-drag would
+            // serve the instant the paddle crossed the ball. Serve on lift.
+            updateRelativeDrag(to: loc)
             #endif
             return
         }
 
         #if !targetEnvironment(macCatalyst)
-        setTouchTarget(loc)
+        updateRelativeDrag(to: loc)
         #endif
     }
 
@@ -1375,6 +1435,7 @@ final class GameScene: SKScene {
         #if targetEnvironment(macCatalyst)
         // Keep last aim; hover continues tracking without a click.
         #else
+        dragAnchorScreen = nil
         touchTarget = nil
         #endif
     }
@@ -1383,6 +1444,7 @@ final class GameScene: SKScene {
         clearServeGesture()
         #if targetEnvironment(macCatalyst)
         #else
+        dragAnchorScreen = nil
         touchTarget = nil
         #endif
     }
