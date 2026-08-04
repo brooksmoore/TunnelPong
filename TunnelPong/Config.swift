@@ -56,19 +56,19 @@ struct Config {
     // Transparent walls: only evenly spaced single strokes + corner rails.
     // Evenly spaced depth rings (every-other of the denser lattice).
     static let ringCount: Int = 9
-    /// Corner radius as a fraction of court width, matched to the iPhone's own
-    /// screen corner (~0.125 of width ≈ 55pt on a 440pt display) so the tunnel
-    /// mouth echoes the device it's running on.
+    /// Nominal corner radius as a fraction of court width. Drawn as *stepped*
+    /// 8-bit corners (not smooth arcs) — see `PixelPath.roundedRect`.
     static let ringCornerFrac: CGFloat = 0.125
     /// Ceiling as a share of the ring's smaller half-dimension — keeps distant
-    /// rings rounded rects instead of collapsing them into discs.
+    /// rings stepped rects instead of collapsing them into discs.
     static let ringCornerCap: CGFloat = 0.32
     /// Depth-ring stroke by near→far band (9 rings): near 3×3pt, mid 3×2pt, far 3×1pt.
     static let ringLineWidthNear: CGFloat = 3
     static let ringLineWidthMid: CGFloat = 2
     static let ringLineWidthFar: CGFloat = 1
-    /// Z-rails use the same 3→2→1 taper (see railLineWidth(index:)).
-    static let railLineWidth: CGFloat = 1
+    /// Fallback stroke when a rail has no band index (e.g. factory default).
+    /// Prefer `railLineWidth(index:)` for live tunnel geometry.
+    static let railLineWidthDefault: CGFloat = 1
     /// How far past the player plane (z=0) toward the camera the corner rails
     /// continue — negative Z. Must stay greater than -focal so scale stays finite.
     /// Makes the tunnel feel like it surrounds the viewer, not stop at the near wall.
@@ -108,8 +108,6 @@ struct Config {
     // MARK: - Ball (constants that do not ramp)
     /// World-space radius (also base on-screen size at z = 0).
     static let ballRadius: CGFloat = 24
-    /// Extra multiplier on rendered ball scale (physics radius unchanged).
-    static let ballDrawScale: CGFloat = 1.0
     /// Extra english when the paddle *corner* is on the ball at serve (0–1 scale).
     static let serveCornerBoost: CGFloat = 0.90
     /// Minimum share of total speed kept along z, so the ball can't stall
@@ -127,15 +125,40 @@ struct Config {
     /// Hold the ball on the plane after a point, then resolve lives/score.
     static let pointFreezeDuration: CGFloat = 0.65
 
+    // MARK: - Curve
+    //
+    // Curveball-style continuous bend: curve is integrated into lateral
+    // velocity every frame and decays exponentially in real time (not per
+    // frame — so 60 Hz and 120 Hz feel the same). After each curve step we
+    // renorm total speed so curve *bends* the path without inflating difficulty.
+
+    /// Fraction of curve remaining after one full second (exponential base).
+    static let curveDecayPerSecond: CGFloat = 0.80
+    /// Scales paddle world-velocity (units/sec) into curve acceleration.
+    /// Sign is applied in `CourtMath.curveFromPaddleVelocity` (player inverted).
+    static let curveFromPaddleVel: CGFloat = 0.55
+    /// Fraction of curve kept after a wall bounce (also axis-flips on that wall).
+    static let curveWallDamp: CGFloat = 0.85
+    /// Hard ceiling on curve vector magnitude.
+    static let curveMax: CGFloat = 900
+    /// |curve| on one axis that awards curveBonus.
+    static let curveBonusThreshold: CGFloat = 120
+    /// |curve| on *both* axes that awards superCurveBonus.
+    static let curveSuperThreshold: CGFloat = 260
+    /// Exponential smooth on paddle velocity samples (~3 frames at 60 Hz).
+    static let paddleVelSmooth: CGFloat = 0.45
+    /// Closes this fraction of the paddle→target gap per 1/60 s (dt-corrected).
+    /// Needed so Mac/iOS produce a real velocity signal for curve.
+    static let paddleFollowLerp: CGFloat = 0.55
+
     // MARK: - Player paddle (full capability always — does not ramp)
     static let playerPaddleHalfW: CGFloat = 72
     static let playerPaddleHalfH: CGFloat = 52
     static let paddleHitSlop: CGFloat = 14
     /// Minimum cumulative drag travel (while button/finger down) to count as a
     /// serve *swipe*. Pure hover never serves — need a click or a real drag.
+    /// Mac and iOS share one threshold.
     static let serveSwipeMin: CGFloat = 18
-    /// Mac click-drag uses the same threshold (hover alone does not serve).
-    static let serveSwipeMinMac: CGFloat = 18
     /// iOS relative-drag amplification. The paddle moves this many times
     /// further than your thumb, so the whole court is reachable one-handed
     /// without stretching. 1.0 would be literal 1:1 dragging.
@@ -144,6 +167,11 @@ struct Config {
     // MARK: - Opponent size (fixed; skill ramps below)
     static let oppPaddleHalfW: CGFloat = 48
     static let oppPaddleHalfH: CGFloat = 36
+    /// D1 wall inset: the AI paddle's *centre* stays this many half-paddle-widths
+    /// off each wall, so wall-hugging shots stay a scoring lane even when the
+    /// AI's tracking speed would otherwise reach everything. 1.0 = flush.
+    /// Raising this widens the lane and makes high levels easier.
+    static let aiWallInsetPaddles: CGFloat = 1.5
 
     // MARK: - 10-level linear difficulty
     //
@@ -178,13 +206,10 @@ struct Config {
     // Per-hit rally add within a point
     static let rallyIncL1: CGFloat = 5
     static let rallyIncL10: CGFloat = 16
-    // Off-center english / spin bite — FULL from L1 (not level-ramped).
-    // Absolute veer grows with ball speed via eng * speed, so late game
-    // feels wilder without gating skill behind the level curve.
-    static let englishStrength: CGFloat = 0.88
-    // Serve drag spin magnitude (screen-space → world spin before renorm).
-    // Full power from round 1; renorm keeps total speed, so faster balls
-    // keep a bigger absolute lateral share after the same drag.
+    // Contact-offset english — demoted in v1.5 so paddle-velocity curve dominates.
+    // Absolute veer still grows with ball speed via eng * speed.
+    static let englishStrength: CGFloat = 0.45
+    // Serve drag → curve magnitude (not direct velocity). Full power from L1.
     static let serveDragSpin: CGFloat = 880
 
     // AI: pure ball tracking. Difficulty = linear tracking speed only.
@@ -211,8 +236,32 @@ struct Config {
     /// Spare lives granted for clearing a level (capped by playerLivesMax).
     static let lifeGainPerLevel = 1
     static let opponentLivesPerLevel = 3
-    static let scorePerHit = 10
+    /// Score when the opponent misses (still level-scaled).
     static let scorePerOpponentLife = 100
+
+    // MARK: - Scoring (Curveball-style self-degrading bonuses)
+    //
+    // Each bonus awards its current value then subtracts its degrade; floors at 0.
+    // All reset to start values when the player loses a life.
+
+    static let hitScoreStart = 100
+    static let hitScoreDegrade = 10
+    static let curveBonusStart = 50
+    static let curveBonusDegrade = 5
+    static let superCurveBonusStart = 150
+    static let superCurveBonusDegrade = 15
+    static let accuracyBonusStart = 100
+    static let accuracyBonusDegrade = 10
+    /// Banked on level clear; decays while the ball is live during the level.
+    static let levelClearBonusStart = 3000
+    /// Points lost per second of live-ball time during a level.
+    static let levelClearDecayPerSecond: CGFloat = 200
+    /// Hit counts as "perfect" when |offset| / paddleHalf ≤ this on both axes.
+    static let accuracyWindowFrac: CGFloat = 0.15
+    /// How long bonus popups stay on screen.
+    static let bonusPopupDuration: CGFloat = 0.85
+    /// Pixel size of bonus popup type.
+    static let bonusPopupSize: CGFloat = 14
 
     // MARK: - Flow
     static let levelTransitionDuration: CGFloat = 1.4
@@ -223,7 +272,7 @@ struct Config {
     static let hudBottomPad: CGFloat = 10
     /// Mac Catalyst titlebar eats the top of the content view; treat as min top inset.
     static let macTitlebarInset: CGFloat = 40
-    /// Legacy alias — HUD now keys off heartsInsetFromNearRing.
+    /// Extra gap below hearts / court top when placing the LVL chrome label.
     static let hudTopGap: CGFloat = 22
 
     // MARK: - Type (procedural 5×7 pixel font — r1 chrome/neon title style)
@@ -304,12 +353,6 @@ struct Config {
     // MARK: - Depth atmosphere (simplified)
     /// Mild edge darken only — sky already carries most of the mood.
     static let vignetteAlpha: CGFloat = 0.22
-    /// Extra face grid off — rings + corner rails are the continuous lattice.
-    static let gridDepthLines = 0
-    static let gridLongLines = 0
-    static let gridAlphaNear: CGFloat = 0.55
-    static let gridAlphaFar: CGFloat = 0.35
-    static let gridLineWidthNear: CGFloat = 2
 
     // MARK: - Audio (procedural, zero assets)
     static let audioMaster: Float = 0.55
@@ -326,8 +369,9 @@ struct Config {
     static let ballShadowYScale: CGFloat = 0.35
     static let ballShadowXScale: CGFloat = 1.2
 
-    // MARK: - Paddle (solid slabs, lightly rounded)
-    static let paddleCornerRadius: CGFloat = 10
+    // MARK: - Paddle (solid slabs, 8-bit stepped corners)
+    /// Corner cut size in points; quantized to `pixel` steps (chunky, not smooth).
+    static let paddleCornerRadius: CGFloat = 9
     static let paddleGlowLineWidth: CGFloat = 4
     static let paddleGlowUp: CGFloat = 0.035
     static let paddleGlowDown: CGFloat = 0.16

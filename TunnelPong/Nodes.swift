@@ -170,16 +170,22 @@ enum NodeFactory {
 
     // MARK: - Tunnel
 
+    /// Ring / panel corner radius in screen points (same formula as GameScene rebuild).
+    static func ringCornerRadius(halfW: CGFloat, halfH: CGFloat, scale: CGFloat) -> CGFloat {
+        let w = halfW * scale
+        let h = halfH * scale
+        let rRaw = Config.ringCornerFrac * (halfW * 2) * scale
+        return min(max(Config.pixel, rRaw), min(w, h) * Config.ringCornerCap)
+    }
+
     static func ring(halfW: CGFloat, halfH: CGFloat, scale: CGFloat,
                      t: CGFloat, center: CGPoint, index: Int = 0) -> SKShapeNode {
         let w = snap(halfW * scale)
         let h = snap(halfH * scale)
-        // iPhone-style corner: a fixed fraction of court width, shrinking with
-        // depth. Capped so the far ring stays a rounded *rect*, not a pink disc.
-        let rRaw = Config.ringCornerFrac * (halfW * 2) * scale
-        let r = snap(min(max(Config.pixel, rRaw), min(w, h) * Config.ringCornerCap))
+        let r = ringCornerRadius(halfW: halfW, halfH: halfH, scale: scale)
         let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
-        let node = SKShapeNode(rect: rect, cornerRadius: r)
+        let node = SKShapeNode(path: PixelPath.roundedRect(rect: rect, cornerRadius: r,
+                                                           pixel: Config.pixel))
         node.position = center
         node.lineWidth = Config.ringLineWidth(index: index)
         node.glowWidth = 0
@@ -207,16 +213,16 @@ enum NodeFactory {
         // Transparent walls — panel exists only so rebuild paths stay valid.
         let w = snap(halfW * scale)
         let h = snap(halfH * scale)
-        let r = min(Config.ringCornerFrac * (halfW * 2) * scale,
-                    min(w, h) * Config.ringCornerCap)
+        let r = ringCornerRadius(halfW: halfW, halfH: halfH, scale: scale)
         let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
-        let node = SKShapeNode(rect: rect, cornerRadius: max(0, r))
+        let node = SKShapeNode(path: PixelPath.roundedRect(rect: rect, cornerRadius: r,
+                                                           pixel: Config.pixel))
         node.position = center
         node.fillColor = .clear
         node.strokeColor = .clear
         node.alpha = 0
         node.isHidden = true
-        node.isAntialiased = true
+        node.isAntialiased = false
         _ = t
         return node
     }
@@ -225,22 +231,12 @@ enum NodeFactory {
         let node = SKShapeNode()
         node.strokeColor = Config.wallNeonPink
         node.alpha = Config.cornerLineAlpha * lerp(1.0, 0.75, t)
-        node.lineWidth = Config.railLineWidth
+        node.lineWidth = Config.railLineWidthDefault
         node.glowWidth = 0
         node.isAntialiased = false
-        node.lineCap = .square
-        node.lineJoin = .miter
-        return node
-    }
-
-    static func gridLine(t: CGFloat) -> SKShapeNode {
-        let node = SKShapeNode()
-        node.strokeColor = Config.wallNeonPink
-        node.alpha = lerp(Config.gridAlphaNear, Config.gridAlphaFar, t)
-        node.lineWidth = Config.gridLineWidthNear
-        node.glowWidth = 0
-        node.isAntialiased = false
-        node.lineCap = .square
+        // Butt caps so the far-end segment stops on the far ring (square caps
+        // used to poke half a stroke past the pink wall).
+        node.lineCap = .butt
         node.lineJoin = .miter
         return node
     }
@@ -250,25 +246,36 @@ enum NodeFactory {
     static let impactGlowName = "impactGlow"
     static let paddleInnerName = "innerPlate"
 
-    /// Softly rounded slab paddle — fill + border + crosshair + impact shell.
+    /// Chunked 8-bit slab paddle — stepped corners, hard pixels, no soft arcs.
     static func paddle(halfW: CGFloat, halfH: CGFloat, color: SKColor) -> SKShapeNode {
         let size = CGSize(width: snap(halfW * 2), height: snap(halfH * 2))
         let cr = Config.paddleCornerRadius
-        let node = SKShapeNode(rectOf: size, cornerRadius: cr)
+        let outerRect = CGRect(x: -size.width / 2, y: -size.height / 2,
+                               width: size.width, height: size.height)
+        let node = SKShapeNode(path: PixelPath.roundedRect(rect: outerRect, cornerRadius: cr,
+                                                           pixel: Config.pixel))
         node.fillColor = color.withAlphaComponent(Config.paddleFillAlpha)
         node.strokeColor = color
         node.lineWidth = Config.pixel
         node.glowWidth = 0
-        node.isAntialiased = true
+        node.isAntialiased = false
+        node.lineJoin = .miter
+        node.lineCap = .square
 
         let inset = Config.paddleInnerInset
-        let innerSize = CGSize(width: max(Config.pixel * 2, size.width - inset * 2),
-                               height: max(Config.pixel * 2, size.height - inset * 2))
-        let inner = SKShapeNode(rectOf: innerSize, cornerRadius: max(0, cr - 3))
+        let innerW = max(Config.pixel * 2, size.width - inset * 2)
+        let innerH = max(Config.pixel * 2, size.height - inset * 2)
+        let innerRect = CGRect(x: -innerW / 2, y: -innerH / 2, width: innerW, height: innerH)
+        let inner = SKShapeNode(path: PixelPath.roundedRect(
+            rect: innerRect,
+            cornerRadius: max(Config.pixel, cr - Config.pixel * 2),
+            pixel: Config.pixel))
         inner.fillColor = .clear
         inner.strokeColor = color.withAlphaComponent(0.45)
         inner.lineWidth = Config.pixel
-        inner.isAntialiased = true
+        inner.isAntialiased = false
+        inner.lineJoin = .miter
+        inner.lineCap = .square
         inner.zPosition = 1
         inner.name = paddleInnerName
         node.addChild(inner)
@@ -281,19 +288,25 @@ enum NodeFactory {
         cross.path = p
         cross.strokeColor = color.withAlphaComponent(0.40)
         cross.lineWidth = Config.pixel
-        cross.isAntialiased = true
-        cross.lineCap = .round
+        cross.isAntialiased = false
+        cross.lineCap = .square
         cross.zPosition = 2
         node.addChild(cross)
 
-        let glow = SKShapeNode(rectOf: CGSize(width: size.width + Config.pixel * 2,
-                                              height: size.height + Config.pixel * 2),
-                               cornerRadius: cr + 1)
+        let gw = size.width + Config.pixel * 2
+        let gh = size.height + Config.pixel * 2
+        let glowRect = CGRect(x: -gw / 2, y: -gh / 2, width: gw, height: gh)
+        let glow = SKShapeNode(path: PixelPath.roundedRect(
+            rect: glowRect,
+            cornerRadius: cr + Config.pixel,
+            pixel: Config.pixel))
         glow.fillColor = .clear
         glow.strokeColor = color
         glow.lineWidth = Config.paddleGlowLineWidth
         glow.glowWidth = 0
-        glow.isAntialiased = true
+        glow.isAntialiased = false
+        glow.lineJoin = .miter
+        glow.lineCap = .square
         glow.alpha = 0
         glow.zPosition = -1
         glow.name = impactGlowName

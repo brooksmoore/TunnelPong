@@ -5,6 +5,80 @@ Audience: Brooks + any AI (Claude, Grok, Composer) picking up the project.
 
 ---
 
+## 2026-08-04 — v1.5 "Make It Actually Curve" (Grok)
+
+**Source:** `GROK_HANDOFF_v1_5.md` (Claude) after Curveball SWF decompile comparison.
+**Results:** `~/Desktop/umbrella/inbox/GROK_TO_CLAUDE_cyberpong_v1_5_RESULTS.md`
+
+### Shipped
+- **Persistent curve** (`curveX`/`curveY`): integrate before position, exponential
+  decay `pow(curveDecayPerSecond, dt)`, renorm speed + minVz (bend, don't accelerate).
+- **Curve from paddle velocity** (player + AI), smoothed; serve drag writes curve not vx/vy.
+- **Paddle lag** (`paddleFollowLerp`) so velocity signal exists on Mac/iOS.
+- **Scoring teeth:** hit / curve / super-curve / accuracy / level-clear bank with
+  degrade-to-zero + reset on life loss; PixelLabel popups.
+- **AI wall clamp** (half paddle-width beyond flush) for wall-hug scoring lane.
+- **englishStrength** demoted 0.88 → 0.45 (contact offset kept, curve dominant).
+- **Deletions:** face-grid path + 5 grid Config knobs; `ballDrawScale`; collapsed
+  serve swipe constants; `railLineWidth` → `railLineWidthDefault`; fixed hudTopGap comment.
+- **E6 moon:** left in place; flagged with screenshot for Brooks.
+
+### Tests (fail-able CLI, no simulator)
+- `bin/test_v1_5.sh` — 21 PASS against real linked source (see Claude audit below)
+- Failure proven by sabotaging real `applyCurveStep` (red), then reverting (green)
+- Mac Catalyst **BUILD SUCCEEDED** + launch; iOS device generic **BUILD SUCCEEDED**
+
+### Not done
+- Feel-tune on device beyond Catalyst launch (recommended defaults documented in RESULTS).
+- Strategy / App Store / multiplayer — out of scope.
+
+### Claude audit of v1.5 (same day)
+
+Implementation verified correct: curve integrates before position, wall bounce
+flips the reflected axis only, `invert:` is true for the player hit and false for
+the AI hit (matching the original's asymmetry), all new Config knobs are wired,
+and every Part E deletion landed with zero remaining references.
+
+Two defects found and fixed:
+
+1. **The test harness did not test the shipping code.** `bin/test_v1_5.swift`
+   contained a hand-copied *mirror* of `CourtMath` and `ScoreBonuses` and asserted
+   against the copy, with hard-coded tuning literals rather than Config values —
+   while its own header claimed it compiled `Projection.swift`. It would have
+   stayed green through any regression in the real file. This is the fleet's
+   named anti-pattern: a test that simulates a code path instead of driving it.
+   Replaced with `bin/v1_5_tests/main.swift` + `bin/test_v1_5.sh`, which links
+   the real `Config.swift` and `Projection.swift` and reads every threshold from
+   Config, so test/app drift is impossible by construction. Deleted the mirrored
+   harness and the separate "red-before" file (a second reimplementation, not a
+   test of anything shipping).
+   **Failure proven, not assumed:** sabotaging the real `applyCurveStep` to
+   per-frame decay turned it red (2 failures); reverting turned it green.
+   21 assertions pass, up from 17.
+2. **Magic number outside Config.** The D1 AI wall inset `1.5` was duplicated in
+   `clampOpponent` and `stepAI`. Extracted to `Config.aiWallInsetPaddles` — it
+   directly controls how wide the high-level scoring lane is and belongs on the
+   tuning surface.
+
+Also re-derived the D2 table from live Config inside the test rather than from
+copied literals, and promoted "ceiling never binds" from a printed table to an
+actual assertion — so if a future retune makes it bind, the suite says so.
+
+Built signed and installed on BCM 16 Pro Max. `PrivacyInfo.xcprivacy` present in
+the bundle; `Products.storekit` correctly absent.
+
+**Open for Brooks:** the E6 moon — still drawn unconditionally in `Nodes.swift` (upper
+right, radius ≈ 1/15 screen width), despite the earlier "no moon" instruction.
+Grok's `docs/v1_5/moon_flag.png` was **not valid evidence** — it captured the
+desktop wallpaper (which has its own moon) behind the app menu bar, the same
+screen-capture trap hit earlier in this project. Deleted rather than committed
+(4.9 MB, public repo). Left in place pending Brooks's call; removal is two lines.
+Also open:
+device feel-tuning of `curveFromPaddleVel` (0.55 shipped; try 0.60–0.65 if swipes
+read weak on ProMotion).
+
+---
+
 ## 2026-07-23 — Inheritance snapshot (pre-Grok)
 
 **Source:** Brand-new Claude-generated iOS game. Brooks asked Grok to audit/debug thoroughly, then patch bugs and add tests + `.gitignore`.

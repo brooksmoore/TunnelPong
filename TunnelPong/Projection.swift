@@ -78,6 +78,321 @@ enum CourtMath {
         let raw = Int((z / zFar * CGFloat(denom)).rounded())
         return max(0, min(ringCount - 1, raw))
     }
+
+    // MARK: - Curve (frame-rate independent)
+
+    /// Integrate curve into lateral velocity, decay curve exponentially in real
+    /// time, then renorm total speed so curve bends without accelerating.
+    static func applyCurveStep(
+        vx: inout CGFloat, vy: inout CGFloat, vz: inout CGFloat,
+        curveX: inout CGFloat, curveY: inout CGFloat,
+        dt: CGFloat,
+        curveDecayPerSecond: CGFloat,
+        minVzFraction: CGFloat
+    ) {
+        guard dt > 0 else { return }
+        let speedBefore = sqrt(vx * vx + vy * vy + vz * vz)
+        vx += curveX * dt
+        vy += curveY * dt
+        let decay = pow(curveDecayPerSecond, dt)
+        curveX *= decay
+        curveY *= decay
+        if speedBefore > 0.001 {
+            renormVelocity(vx: &vx, vy: &vy, vz: &vz,
+                           speed: speedBefore, minVzFraction: minVzFraction)
+        }
+    }
+
+    /// Clamp curve vector magnitude to `maxMag`.
+    static func clampCurve(curveX: inout CGFloat, curveY: inout CGFloat, maxMag: CGFloat) {
+        let mag = hypot(curveX, curveY)
+        guard mag > maxMag, mag > 0.0001 else { return }
+        let s = maxMag / mag
+        curveX *= s
+        curveY *= s
+    }
+
+    /// Wall bounce: damp curve and flip the component on the reflected axis.
+    static func wallBounceCurve(
+        curveX: inout CGFloat, curveY: inout CGFloat,
+        flipX: Bool, flipY: Bool,
+        damp: CGFloat
+    ) {
+        if flipX { curveX = -curveX }
+        if flipY { curveY = -curveY }
+        curveX *= damp
+        curveY *= damp
+    }
+
+    /// Curve set from paddle world-velocity (units/sec).
+    ///
+    /// Curveball player hit uses **inverted** brush English:
+    ///   `myCurve.x = (-pSpeedX) / curveAmount`
+    ///   `myCurve.y = pSpeedY / curveAmount` with Flash `pos.y -= speed.y`
+    /// which visually means: swipe right → ball curves left; swipe down → ball lifts.
+    /// Enemy hit keeps **same-direction** curve (`+eSpeedX`, `-eSpeedY` in Flash).
+    /// Pass `invert: true` for the near (player) paddle; `false` for the AI.
+    static func curveFromPaddleVelocity(
+        paddleVelX: CGFloat, paddleVelY: CGFloat,
+        scale: CGFloat, maxMag: CGFloat,
+        invert: Bool = true
+    ) -> (CGFloat, CGFloat) {
+        let sx: CGFloat = invert ? -1 : 1
+        let sy: CGFloat = invert ? -1 : 1
+        var cx = sx * paddleVelX * scale
+        var cy = sy * paddleVelY * scale
+        clampCurve(curveX: &cx, curveY: &cy, maxMag: maxMag)
+        return (cx, cy)
+    }
+
+    /// Exponential smooth toward a sample (alpha in 0…1 per call).
+    static func smoothToward(_ current: CGFloat, sample: CGFloat, alpha: CGFloat) -> CGFloat {
+        current + (sample - current) * max(0, min(1, alpha))
+    }
+
+    /// Fraction of gap closed in `dt` when `lerpPerFrame` is the 60 Hz close rate.
+    static func followAlpha(lerpPerFrame: CGFloat, dt: CGFloat) -> CGFloat {
+        1 - pow(1 - max(0, min(1, lerpPerFrame)), dt * 60)
+    }
+}
+
+// MARK: - Self-degrading score bonuses (pure; no SpriteKit)
+
+/// Curveball-style bonuses: award then degrade; floor at 0; reset on life loss.
+struct ScoreBonuses: Equatable {
+    var hitScore: Int
+    var curveBonus: Int
+    var superCurveBonus: Int
+    var accuracyBonus: Int
+    /// Remaining level-clear bank (decays while ball is live).
+    var levelClearBonus: Int
+    /// Sub-point carry for level-clear decay (not part of score display).
+    var levelClearFrac: CGFloat = 0
+
+    static func fresh(
+        hit: Int = 100,
+        curve: Int = 50,
+        superCurve: Int = 150,
+        accuracy: Int = 100,
+        levelClear: Int = 3000
+    ) -> ScoreBonuses {
+        ScoreBonuses(hitScore: hit, curveBonus: curve, superCurveBonus: superCurve,
+                     accuracyBonus: accuracy, levelClearBonus: levelClear,
+                     levelClearFrac: 0)
+    }
+
+    mutating func reset(
+        hit: Int, curve: Int, superCurve: Int, accuracy: Int, levelClear: Int
+    ) {
+        hitScore = hit
+        curveBonus = curve
+        superCurveBonus = superCurve
+        accuracyBonus = accuracy
+        levelClearBonus = levelClear
+        levelClearFrac = 0
+    }
+
+    /// Award current hit value, then degrade. Returns points added (≥ 0).
+    mutating func awardHit(degrade: Int) -> Int {
+        let got = max(0, hitScore)
+        hitScore = max(0, hitScore - max(0, degrade))
+        return got
+    }
+
+    /// Single-axis curve bonus.
+    mutating func awardCurve(degrade: Int) -> Int {
+        let got = max(0, curveBonus)
+        curveBonus = max(0, curveBonus - max(0, degrade))
+        return got
+    }
+
+    /// Both-axes super curve bonus.
+    mutating func awardSuperCurve(degrade: Int) -> Int {
+        let got = max(0, superCurveBonus)
+        superCurveBonus = max(0, superCurveBonus - max(0, degrade))
+        return got
+    }
+
+    mutating func awardAccuracy(degrade: Int) -> Int {
+        let got = max(0, accuracyBonus)
+        accuracyBonus = max(0, accuracyBonus - max(0, degrade))
+        return got
+    }
+
+    /// Tick level-clear bank down while the ball is live. Never negative.
+    mutating func tickLevelClear(dt: CGFloat, decayPerSecond: CGFloat) {
+        guard dt > 0, decayPerSecond > 0, levelClearBonus > 0 else { return }
+        levelClearFrac += decayPerSecond * dt
+        let whole = Int(levelClearFrac)
+        if whole > 0 {
+            levelClearBonus = max(0, levelClearBonus - whole)
+            levelClearFrac -= CGFloat(whole)
+        }
+        if levelClearBonus == 0 { levelClearFrac = 0 }
+    }
+
+    /// Bank remaining level-clear bonus and re-arm for next level.
+    mutating func bankLevelClear(resetTo: Int) -> Int {
+        let got = max(0, levelClearBonus)
+        levelClearBonus = max(0, resetTo)
+        levelClearFrac = 0
+        return got
+    }
+}
+
+/// Which style bonus popups to show (player education, not decoration).
+enum BonusPopupKind: String {
+    case curve = "CURVE BONUS"
+    case superCurve = "SUPER CURVE"
+    case perfect = "PERFECT HIT"
+}
+
+/// Classify a hit for scoring / popups from curve + paddle offset.
+struct HitBonusResult: Equatable {
+    var points: Int
+    var popups: [BonusPopupKind]
+}
+
+enum HitScoring {
+    /// Apply hit / curve / super / accuracy awards for one paddle contact.
+    static func scorePlayerHit(
+        bonuses: inout ScoreBonuses,
+        curveX: CGFloat, curveY: CGFloat,
+        curveBonusThreshold: CGFloat,
+        curveSuperThreshold: CGFloat,
+        offsetFracX: CGFloat, offsetFracY: CGFloat,
+        accuracyWindowFrac: CGFloat,
+        hitDegrade: Int, curveDegrade: Int,
+        superDegrade: Int, accuracyDegrade: Int
+    ) -> HitBonusResult {
+        var points = bonuses.awardHit(degrade: hitDegrade)
+        var popups: [BonusPopupKind] = []
+
+        let ax = abs(curveX), ay = abs(curveY)
+        let superCurve = ax >= curveSuperThreshold && ay >= curveSuperThreshold
+        let anyCurve = ax >= curveBonusThreshold || ay >= curveBonusThreshold
+
+        if superCurve {
+            points += bonuses.awardSuperCurve(degrade: superDegrade)
+            popups.append(.superCurve)
+        } else if anyCurve {
+            points += bonuses.awardCurve(degrade: curveDegrade)
+            popups.append(.curve)
+        }
+
+        if abs(offsetFracX) <= accuracyWindowFrac,
+           abs(offsetFracY) <= accuracyWindowFrac {
+            points += bonuses.awardAccuracy(degrade: accuracyDegrade)
+            popups.append(.perfect)
+        }
+
+        return HitBonusResult(points: points, popups: popups)
+    }
+}
+
+// MARK: - 8-bit stepped rounded rects
+
+/// Pixel-art style rounded rectangles: corners are quantized stair-steps on
+/// the logical pixel grid, never smooth Bézier arcs.
+enum PixelPath {
+
+    /// Inset from the sharp corner (±halfW, ±halfH) to the 45° meeting point
+    /// on a stepped (or circular) corner of radius `r` — used for rail anchors.
+    static func railCornerInset(radius r: CGFloat) -> CGFloat {
+        max(0, r * (1 - 1 / sqrt(2)))
+    }
+
+    /// Quantize a nominal corner radius down to whole logical pixels.
+    static func quantizeRadius(_ r: CGFloat, pixel: CGFloat = 3) -> CGFloat {
+        let px = max(pixel, 1)
+        guard r > 0 else { return 0 }
+        return max(px, floor(r / px) * px)
+    }
+
+    /// Closed path for a rect with 8-bit stepped corners.
+    ///
+    /// Corners follow a quarter-circle, then snap to a fine pixel grid so the
+    /// silhouette reads *round* (many small stairs) rather than a flat chamfer.
+    /// `pixel` is the style block size; sampling uses a finer grid (`pixel/2`,
+    /// min 1) so large rings don't collapse into octagons.
+    static func roundedRect(rect: CGRect, cornerRadius: CGFloat,
+                            pixel: CGFloat = 3) -> CGPath {
+        let stylePx = max(pixel, 1)
+        // Finer snap than style block → rounder stairs, still hard-edged.
+        let snapPx = max(1, floor(stylePx / 2))
+        var r = quantizeRadius(cornerRadius, pixel: snapPx)
+        let maxR = min(rect.width, rect.height) / 2
+        r = min(r, floor(maxR / snapPx) * snapPx)
+        if r < snapPx * 0.5 {
+            let path = CGMutablePath()
+            path.addRect(rect)
+            return path
+        }
+
+        let minX = rect.minX, maxX = rect.maxX
+        let minY = rect.minY, maxY = rect.maxY
+        // Sample by arc length so we keep ~1 snap-cell per step around the curve.
+        func cornerOffsets() -> [CGPoint] {
+            let arcLen = r * CGFloat.pi / 2
+            let steps = max(4, Int(ceil(arcLen / snapPx)))
+            var pts: [CGPoint] = []
+            var lastIX = Int.min, lastIY = Int.min
+            for i in 0...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                let ang = t * CGFloat.pi / 2
+                let lx = (r * sin(ang) / snapPx).rounded() * snapPx
+                let ly = (r * cos(ang) / snapPx).rounded() * snapPx
+                let ix = Int((lx / snapPx).rounded())
+                let iy = Int((ly / snapPx).rounded())
+                if ix != lastIX || iy != lastIY {
+                    pts.append(CGPoint(x: lx, y: ly))
+                    lastIX = ix
+                    lastIY = iy
+                }
+            }
+            // Always pin exact start/end on the axes so sides meet cleanly.
+            if let first = pts.first, first.x != 0 || first.y != r {
+                pts.insert(CGPoint(x: 0, y: r), at: 0)
+            }
+            if let last = pts.last, last.x != r || last.y != 0 {
+                pts.append(CGPoint(x: r, y: 0))
+            }
+            if pts.isEmpty { pts = [CGPoint(x: 0, y: r), CGPoint(x: r, y: 0)] }
+            return pts
+        }
+        let c = cornerOffsets()
+        let path = CGMutablePath()
+
+        // Start mid-top, go clockwise: top → TR → right → BR → bottom → BL → left → TL → close.
+        path.move(to: CGPoint(x: 0, y: maxY))
+
+        // Top edge into top-right corner
+        path.addLine(to: CGPoint(x: maxX - r, y: maxY))
+        for p in c {
+            path.addLine(to: CGPoint(x: maxX - r + p.x, y: maxY - r + p.y))
+        }
+
+        // Right edge into bottom-right
+        path.addLine(to: CGPoint(x: maxX, y: minY + r))
+        for p in c {
+            path.addLine(to: CGPoint(x: maxX - r + p.y, y: minY + r - p.x))
+        }
+
+        // Bottom edge into bottom-left
+        path.addLine(to: CGPoint(x: minX + r, y: minY))
+        for p in c {
+            path.addLine(to: CGPoint(x: minX + r - p.x, y: minY + r - p.y))
+        }
+
+        // Left edge into top-left
+        path.addLine(to: CGPoint(x: minX, y: maxY - r))
+        for p in c {
+            path.addLine(to: CGPoint(x: minX + r - p.y, y: maxY - r + p.x))
+        }
+
+        path.closeSubpath()
+        return path
+    }
 }
 
 // MARK: - Peer mirror (v2 prep; not used by solo gameplay)

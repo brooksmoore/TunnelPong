@@ -38,11 +38,21 @@ final class GameScene: SKScene {
     private var opponentLives = Config.opponentLivesPerLevel
     private var rallyHits = 0
     private var highScore = UserDefaults.standard.integer(forKey: "highScore")
+    /// Self-degrading hit / curve / accuracy / level-clear bonuses.
+    private var bonuses = ScoreBonuses.fresh(
+        hit: Config.hitScoreStart,
+        curve: Config.curveBonusStart,
+        superCurve: Config.superCurveBonusStart,
+        accuracy: Config.accuracyBonusStart,
+        levelClear: Config.levelClearBonusStart
+    )
 
     // MARK: - Ball (world coordinates)
 
     private var bx: CGFloat = 0, by: CGFloat = 0, bz: CGFloat = 0
     private var vx: CGFloat = 0, vy: CGFloat = 0, vz: CGFloat = 0
+    /// Continuous curve acceleration (Curveball-style banana arc).
+    private var curveX: CGFloat = 0, curveY: CGFloat = 0
     private var ballLive = false           // false while waiting to serve / frozen
     private var serveCountdown: CGFloat = 0
     /// You serve first each round; after a miss the opponent auto-serves.
@@ -71,6 +81,11 @@ final class GameScene: SKScene {
     private var touchTarget: CGPoint?                   // where the finger wants the paddle
     private var ox: CGFloat = 0, oy: CGFloat = 0        // opponent, at z = zFar
     // AI is pure live-XY tracking — no intercept predict / aim error / delay.
+    /// Smoothed paddle world-velocity (units/sec) — source of curve on contact.
+    private var playerVelX: CGFloat = 0, playerVelY: CGFloat = 0
+    private var oppVelX: CGFloat = 0, oppVelY: CGFloat = 0
+    private var prevPx: CGFloat = 0, prevPy: CGFloat = 0
+    private var prevOx: CGFloat = 0, prevOy: CGFloat = 0
 
     // MARK: - Timers
 
@@ -86,7 +101,6 @@ final class GameScene: SKScene {
     private var rings: [SKShapeNode] = []
     private var depthPanels: [SKShapeNode] = []
     private var railSegments: [SKShapeNode] = []
-    private var gridLines: [SKShapeNode] = []
     private var ringPulses: [SKAction] = []
     private var pauseDim: SKSpriteNode!
     private var scanlineNode: SKSpriteNode!
@@ -117,6 +131,8 @@ final class GameScene: SKScene {
     private var pauseButton: PixelLabel!
     private var serveHintLabel: PixelLabel!
     private var pointCalloutLabel: PixelLabel!
+    private var bonusPopupLabel: PixelLabel!
+    private var bonusPopupCountdown: CGFloat = 0
 
     private var titleLayer: SKNode!
     private var titleHighLabel: PixelLabel!
@@ -302,18 +318,17 @@ final class GameScene: SKScene {
     /// Safe to call before the tunnel exists (arrays are empty).
     /// Where a corner rail should meet a ring, in screen space.
     ///
-    /// The ring's *sharp* corner at (±halfW, ±halfH) is not on the drawn path
-    /// any more — the rounded corner cuts across it. Aiming rails there left
-    /// them floating outside the ring. The true meeting point is the 45° point
-    /// on the corner arc, which sits inward from the sharp corner by
-    /// r·(1 − 1/√2) on each axis.
+    /// Matches ring drawing: snapped half-extents + stepped-corner inset so
+    /// rails land on the ring outline and never poke past the far wall.
     private func railAnchor(sx: CGFloat, sy: CGFloat, z: CGFloat) -> CGPoint {
-        let s = proj.scale(z: z)
-        let w = halfW * s
-        let h = halfH * s
-        let r = min(Config.ringCornerFrac * (halfW * 2) * s,
-                    min(w, h) * Config.ringCornerCap)
-        let inset = r * (1 - 1 / sqrt(2))
+        // Never place anchors past the opponent plane (zFar).
+        let zClamped = min(max(z, Config.railNearExtendZ), Config.zFar)
+        let s = proj.scale(z: zClamped)
+        // Same snap as NodeFactory.ring so rails meet the drawn path.
+        let w = Config.snap(halfW * s)
+        let h = Config.snap(halfH * s)
+        let r = NodeFactory.ringCornerRadius(halfW: halfW, halfH: halfH, scale: s)
+        let inset = PixelPath.railCornerInset(radius: r)
         return CGPoint(x: proj.center.x + sx * (w - inset),
                        y: proj.center.y + sy * (h - inset))
     }
@@ -322,14 +337,16 @@ final class GameScene: SKScene {
         for (i, node) in rings.enumerated() {
             let t = CourtMath.ringT(index: i, ringCount: Config.ringCount)
             let s = proj.scale(z: Config.zFar * t)
-            let w = halfW * s, h = halfH * s
-            // Matches NodeFactory.ring: iPhone-proportioned corner, capped so
-            // the far ring stays a rect rather than collapsing to a disc.
-            let r = min(Config.ringCornerFrac * (halfW * 2) * s,
-                        min(w, h) * Config.ringCornerCap)
+            let w = Config.snap(halfW * s)
+            let h = Config.snap(halfH * s)
+            let r = NodeFactory.ringCornerRadius(halfW: halfW, halfH: halfH, scale: s)
             let rect = CGRect(x: -w, y: -h, width: 2 * w, height: 2 * h)
-            node.path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+            let path = PixelPath.roundedRect(rect: rect, cornerRadius: r, pixel: Config.pixel)
+            node.path = path
             node.position = proj.center
+            node.isAntialiased = false
+            node.lineJoin = .miter
+            node.lineCap = .square
             node.lineWidth = Config.ringLineWidth(index: i)
             // Far plane: soft pink fill + hairline outline (visually matches
             // second-to-last wire; fill+stroke needs a thinner lineWidth).
@@ -345,12 +362,12 @@ final class GameScene: SKScene {
                 node.alpha = NodeFactory.lerp(Config.ringAlphaNear, Config.ringAlphaFar, t)
             }
             if i < depthPanels.count {
-                depthPanels[i].path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+                depthPanels[i].path = path
                 depthPanels[i].position = proj.center
             }
         }
         // Z-axis corner rails: (1) stubs past the near plane toward the camera,
-        // then (2) one segment per ring gap so stroke tapers 3→2→1 into the far wall.
+        // then (2) one segment per ring gap ending *on* the far wall — never past.
         let gaps = max(Config.ringCount - 1, 1)
         var i = 0
         for sx: CGFloat in [-1, 1] {
@@ -363,94 +380,38 @@ final class GameScene: SKScene {
                     railSegments[i].path = path
                     railSegments[i].strokeColor = Config.wallNeonPink
                     railSegments[i].lineWidth = Config.railNearExtendWidth
+                    railSegments[i].lineCap = .butt
                     railSegments[i].alpha = min(1, Config.cornerLineAlpha * 1.05)
+                    railSegments[i].isHidden = false
                     i += 1
                 }
                 for seg in 0..<gaps {
                     guard i < railSegments.count else { break }
                     let z0 = Config.zFar * CourtMath.ringT(index: seg, ringCount: Config.ringCount)
-                    let z1 = Config.zFar * CourtMath.ringT(index: seg + 1, ringCount: Config.ringCount)
+                    // Clamp so the last segment terminates exactly at zFar.
+                    let z1 = min(
+                        Config.zFar * CourtMath.ringT(index: seg + 1, ringCount: Config.ringCount),
+                        Config.zFar
+                    )
                     let path = CGMutablePath()
                     path.move(to: railAnchor(sx: sx, sy: sy, z: z0))
                     path.addLine(to: railAnchor(sx: sx, sy: sy, z: z1))
                     railSegments[i].path = path
                     railSegments[i].strokeColor = Config.wallNeonPink
                     railSegments[i].lineWidth = Config.railLineWidth(index: seg)
+                    railSegments[i].lineCap = .butt
                     let t = CourtMath.ringT(index: seg, ringCount: Config.ringCount)
                     railSegments[i].alpha = Config.cornerLineAlpha * NodeFactory.lerp(1.0, 0.75, t)
+                    railSegments[i].isHidden = false
                     i += 1
                 }
             }
         }
-        rebuildGridPaths()
-    }
-
-    /// Floor + ceiling depth rungs and longitudinal rails down all four faces.
-    private func rebuildGridPaths() {
-        guard !gridLines.isEmpty else { return }
-        var idx = 0
-        // Depth rungs on floor and ceiling.
-        for faceY: CGFloat in [-1, 1] {
-            for d in 0..<Config.gridDepthLines {
-                guard idx < gridLines.count else { return }
-                let t = CGFloat(d + 1) / CGFloat(Config.gridDepthLines + 1)
-                let z = Config.zFar * t
-                let path = CGMutablePath()
-                path.move(to: proj.project(x: -halfW, y: faceY * halfH, z: z))
-                path.addLine(to: proj.project(x: halfW, y: faceY * halfH, z: z))
-                gridLines[idx].path = path
-                gridLines[idx].strokeColor = Config.wallNeonPink
-                gridLines[idx].alpha = NodeFactory.lerp(Config.gridAlphaNear, Config.gridAlphaFar, t)
-                gridLines[idx].lineWidth = Config.gridLineWidthNear
-                idx += 1
-            }
-        }
-        // Depth rungs on left and right walls.
-        for faceX: CGFloat in [-1, 1] {
-            for d in 0..<Config.gridDepthLines {
-                guard idx < gridLines.count else { return }
-                let t = CGFloat(d + 1) / CGFloat(Config.gridDepthLines + 1)
-                let z = Config.zFar * t
-                let path = CGMutablePath()
-                path.move(to: proj.project(x: faceX * halfW, y: -halfH, z: z))
-                path.addLine(to: proj.project(x: faceX * halfW, y: halfH, z: z))
-                gridLines[idx].path = path
-                gridLines[idx].strokeColor = Config.wallNeonPink
-                gridLines[idx].alpha = NodeFactory.lerp(Config.gridAlphaNear, Config.gridAlphaFar, t)
-                gridLines[idx].lineWidth = Config.gridLineWidthNear
-                idx += 1
-            }
-        }
-        // Longitudinal face lines (off when gridLongLines == 0 — rings + rails only).
-        for face in 0..<4 {
-            for k in 0..<Config.gridLongLines {
-                guard idx < gridLines.count else { return }
-                let u = CGFloat(k + 1) / CGFloat(Config.gridLongLines + 1)
-                let path = CGMutablePath()
-                switch face {
-                case 0:
-                    let x = -halfW + 2 * halfW * u
-                    path.move(to: proj.project(x: x, y: -halfH, z: 0))
-                    path.addLine(to: proj.project(x: x, y: -halfH, z: Config.zFar))
-                case 1:
-                    let x = -halfW + 2 * halfW * u
-                    path.move(to: proj.project(x: x, y: halfH, z: 0))
-                    path.addLine(to: proj.project(x: x, y: halfH, z: Config.zFar))
-                case 2:
-                    let y = -halfH + 2 * halfH * u
-                    path.move(to: proj.project(x: -halfW, y: y, z: 0))
-                    path.addLine(to: proj.project(x: -halfW, y: y, z: Config.zFar))
-                default:
-                    let y = -halfH + 2 * halfH * u
-                    path.move(to: proj.project(x: halfW, y: y, z: 0))
-                    path.addLine(to: proj.project(x: halfW, y: y, z: Config.zFar))
-                }
-                gridLines[idx].path = path
-                gridLines[idx].strokeColor = Config.wallNeonPink
-                gridLines[idx].alpha = Config.gridAlphaNear * 0.7
-                gridLines[idx].lineWidth = Config.gridLineWidthNear
-                idx += 1
-            }
+        // Any leftover rails (count mismatch after rebuild) must not keep old paths.
+        while i < railSegments.count {
+            railSegments[i].path = nil
+            railSegments[i].isHidden = true
+            i += 1
         }
     }
 
@@ -467,19 +428,24 @@ final class GameScene: SKScene {
         let lvlY = min(heartsY - 22, courtTopY - Config.hudTopGap)
         hudLevelLabel.position = CGPoint(x: cx, y: lvlY)
 
-        // Bottom of *court* (not screen edge): score, then serve hint under it.
-        // Keeps "CLICK OR DRAG TO SERVE" fully on-screen inside the play band.
+        // Score sits just above the court floor (inside the play band).
         let courtFloor = proj.center.y - halfH
-        // Score above serve hint with a clear gap (hint a few px lower).
         let scoreY = courtFloor + 34
-        let serveY = courtFloor + 6
         let minFloor = botSafe + Config.hudBottomPad + 36
         let safeScoreY = max(scoreY, minFloor + 28)
-        let safeServeY = max(serveY, minFloor)
+
+        // Serve prompt: bottom of the *visible screen* (safe-area floor), not
+        // the court floor — so it never sits mid-tunnel over the action.
+        let serveY = botSafe + Config.hudBottomPad + 14
 
         hudScoreLabel.position = CGPoint(x: cx, y: safeScoreY)
-        serveHintLabel.position = CGPoint(x: cx, y: safeServeY)
+        serveHintLabel.position = CGPoint(x: cx, y: serveY)
         pauseButton.position = CGPoint(x: size.width - sidePad - 8, y: safeScoreY)
+        // Bonus popups sit above mid-court, snapped to the pixel grid.
+        if bonusPopupLabel != nil {
+            let popY = Config.snap((courtTopY + courtFloor) * 0.5 + halfH * 0.15)
+            bonusPopupLabel.position = Config.snapPoint(CGPoint(x: cx, y: popY))
+        }
         hudHighScoreLabel?.isHidden = true
     }
 
@@ -527,15 +493,6 @@ final class GameScene: SKScene {
             panel.zPosition = 1
             worldNode.addChild(panel)
             depthPanels.append(panel)
-        }
-
-        // Perspective grid on floor / ceiling / walls.
-        let gridCount = Config.gridDepthLines * 4 + Config.gridLongLines * 4
-        for _ in 0..<gridCount {
-            let line = NodeFactory.gridLine(t: 0.4)
-            line.zPosition = 2.5
-            worldNode.addChild(line)
-            gridLines.append(line)
         }
 
         for i in 0..<Config.ringCount {
@@ -664,6 +621,11 @@ final class GameScene: SKScene {
 
         hudScoreLabel = NodeFactory.hudLabel("0", size: 22, color: Config.hudColor, alpha: 0.95)
         hudNode.addChild(hudScoreLabel)
+
+        bonusPopupLabel = NodeFactory.hudLabel("", size: Config.bonusPopupSize,
+                                               color: Config.titleAccent, alpha: 1)
+        bonusPopupLabel.isHidden = true
+        hudNode.addChild(bonusPopupLabel)
 
         // High score is title + game-over only (not live HUD).
         hudHighScoreLabel = NodeFactory.hudLabel("", size: 14, color: Config.hudColor, alpha: 0)
@@ -879,12 +841,23 @@ final class GameScene: SKScene {
         hudScoreLabel.alpha = 0.95
         playerLives = Config.playerLives
         opponentLives = Config.opponentLivesPerLevel
+        bonuses = ScoreBonuses.fresh(
+            hit: Config.hitScoreStart,
+            curve: Config.curveBonusStart,
+            superCurve: Config.superCurveBonusStart,
+            accuracy: Config.accuracyBonusStart,
+            levelClear: Config.levelClearBonusStart
+        )
         px = 0; py = 0; ox = 0; oy = 0
+        prevPx = 0; prevPy = 0; prevOx = 0; prevOy = 0
+        playerVelX = 0; playerVelY = 0; oppVelX = 0; oppVelY = 0
+        curveX = 0; curveY = 0
         touchTarget = nil
         nextServer = .player     // every round (incl. level 1): you serve first
         awaitingPlayerServe = false
         pointFreezeCountdown = 0
         pointCalloutLabel.isHidden = true
+        hideBonusPopup()
         serveHintLabel.isHidden = true
         clearServeGesture()
 
@@ -955,11 +928,40 @@ final class GameScene: SKScene {
     }
 
     private func serveTravelMin() -> CGFloat {
-        #if targetEnvironment(macCatalyst)
-        return Config.serveSwipeMinMac
-        #else
-        return Config.serveSwipeMin
-        #endif
+        Config.serveSwipeMin
+    }
+
+    private func resetBonusesOnLifeLoss() {
+        bonuses.reset(
+            hit: Config.hitScoreStart,
+            curve: Config.curveBonusStart,
+            superCurve: Config.superCurveBonusStart,
+            accuracy: Config.accuracyBonusStart,
+            levelClear: Config.levelClearBonusStart
+        )
+    }
+
+    private func showBonusPopup(_ kind: BonusPopupKind) {
+        guard bonusPopupLabel != nil else { return }
+        bonusPopupLabel.display(kind.rawValue)
+        bonusPopupLabel.isHidden = false
+        bonusPopupLabel.alpha = 1
+        bonusPopupCountdown = Config.bonusPopupDuration
+    }
+
+    private func hideBonusPopup() {
+        bonusPopupLabel?.isHidden = true
+        bonusPopupCountdown = 0
+    }
+
+    private func tickBonusPopup(_ dt: CGFloat) {
+        guard bonusPopupCountdown > 0 else { return }
+        bonusPopupCountdown -= dt
+        if bonusPopupCountdown <= 0 {
+            hideBonusPopup()
+        } else if bonusPopupCountdown < 0.2 {
+            bonusPopupLabel?.alpha = max(0, bonusPopupCountdown / 0.2)
+        }
     }
 
     /// Drag-serve: paddle on ball + enough travel while button/finger is down.
@@ -986,6 +988,7 @@ final class GameScene: SKScene {
         serveHintLabel.isHidden = true
         clearServeGesture()
         ballLive = true
+        curveX = 0; curveY = 0
         let speed = levelBallSpeed()
         let a = CGFloat.random(in: -0.45...0.45)
         let b = CGFloat.random(in: -0.30...0.30)
@@ -1015,17 +1018,26 @@ final class GameScene: SKScene {
         let corner = abs(nX) * abs(nY)
         let eng = englishStrength() * (1 + Config.serveCornerBoost * corner)
 
+        // Serve drag → curve (brush English: opposite the swipe, like Curveball).
         let dragMag = hypot(dragScreen.x, dragScreen.y)
-        var spinX: CGFloat = 0, spinY: CGFloat = 0
         if dragMag > 3 {
             let t = min(dragMag, 90) / 90
             let spin = serveDragSpin()
-            spinX = (dragScreen.x / dragMag) * spin * t
-            spinY = (dragScreen.y / dragMag) * spin * t
+            // Negate: downward swipe lifts; leftward swipe curves right.
+            curveX = -(dragScreen.x / dragMag) * spin * t
+            curveY = -(dragScreen.y / dragMag) * spin * t
+            CourtMath.clampCurve(curveX: &curveX, curveY: &curveY, maxMag: Config.curveMax)
+        } else {
+            // Still impart curve from live paddle velocity if any.
+            let c = CourtMath.curveFromPaddleVelocity(
+                paddleVelX: playerVelX, paddleVelY: playerVelY,
+                scale: Config.curveFromPaddleVel, maxMag: Config.curveMax,
+                invert: true)
+            curveX = c.0; curveY = c.1
         }
 
-        vx = nX * eng * speed + spinX
-        vy = nY * eng * speed + spinY
+        vx = nX * eng * speed
+        vy = nY * eng * speed
         vz = sqrt(max(speed * speed * 0.85, 1))
         ballLive = true
         applySpeed(speed)
@@ -1084,6 +1096,7 @@ final class GameScene: SKScene {
         ballLive = false
         bx = x; by = y; bz = z
         vx = 0; vy = 0; vz = 0
+        curveX = 0; curveY = 0
         pendingPointWin = playerScored
         pointFreezeCountdown = Config.pointFreezeDuration
         pointCalloutLabel?.isHidden = true
@@ -1098,6 +1111,7 @@ final class GameScene: SKScene {
         } else {
             // Hearts are SPARE lives. 0 → -1 ends the run after freeze.
             playerLives -= 1
+            resetBonusesOnLifeLoss()
             updateLivesHUD()
             Haptics.shared.lifeLost()
             Audio.shared.lifeLost()
@@ -1140,6 +1154,9 @@ final class GameScene: SKScene {
         // Earn a spare back for clearing a level — but only up to the cap, so
         // a clean level grants nothing and the pressure never fully lifts.
         playerLives = min(playerLives + Config.lifeGainPerLevel, Config.playerLivesMax)
+        // Bank remaining level-clear bonus (rewards fast aggressive clears).
+        score += bonuses.bankLevelClear(resetTo: Config.levelClearBonusStart)
+        updateScoreHUD()
         updateLevelHUD()
         updateLivesHUD()
         Haptics.shared.levelUp()
@@ -1147,6 +1164,7 @@ final class GameScene: SKScene {
         transitionLabel.display("LEVEL \(level)")
         transitionLabel.isHidden = false
         ballNode.isHidden = true
+        curveX = 0; curveY = 0
         transitionCountdown = Config.levelTransitionDuration
         phase = .levelTransition
     }
@@ -1258,6 +1276,7 @@ final class GameScene: SKScene {
         switch phase {
         case .playing:
             stepPlayer(dt)
+            tickBonusPopup(dt)
             if pointFreezeCountdown > 0 {
                 pointFreezeCountdown -= dt
                 if pointFreezeCountdown <= 0 { resolvePointFreeze() }
@@ -1280,6 +1299,7 @@ final class GameScene: SKScene {
             renderWorld()
         case .levelTransition:
             stepPlayer(dt)
+            tickBonusPopup(dt)
             transitionCountdown -= dt
             if transitionCountdown <= 0 { endTransition() }
             renderWorld()
@@ -1291,12 +1311,27 @@ final class GameScene: SKScene {
     // MARK: - Player paddle
 
     private func stepPlayer(_ dt: CGFloat) {
-        guard let target = touchTarget else { return }
-        // Full capability from frame 1: paddle is the pointer (no lag).
-        _ = dt
-        px = target.x
-        py = target.y
+        guard let target = touchTarget else {
+            playerVelX = CourtMath.smoothToward(playerVelX, sample: 0, alpha: Config.paddleVelSmooth)
+            playerVelY = CourtMath.smoothToward(playerVelY, sample: 0, alpha: Config.paddleVelSmooth)
+            prevPx = px; prevPy = py
+            return
+        }
+        // Lag toward target so paddle velocity is real (curve needs a signal).
+        let alpha = CourtMath.followAlpha(lerpPerFrame: Config.paddleFollowLerp, dt: max(dt, 1.0 / 240))
+        px += (target.x - px) * alpha
+        py += (target.y - py) * alpha
         clampPlayer()
+
+        if dt > 0.0001 {
+            let rawVx = (px - prevPx) / dt
+            let rawVy = (py - prevPy) / dt
+            let a = Config.paddleVelSmooth
+            playerVelX = CourtMath.smoothToward(playerVelX, sample: rawVx, alpha: a)
+            playerVelY = CourtMath.smoothToward(playerVelY, sample: rawVy, alpha: a)
+        }
+        prevPx = px
+        prevPy = py
     }
 
     private func clampPlayer() {
@@ -1307,8 +1342,9 @@ final class GameScene: SKScene {
     }
 
     private func clampOpponent() {
-        let mx = max(0, halfW - Config.oppPaddleHalfW)
-        let my = max(0, halfH - Config.oppPaddleHalfH)
+        // Match stepAI wall inset (half paddle-width gap beyond flush).
+        let mx = max(0, halfW - Config.oppPaddleHalfW * Config.aiWallInsetPaddles)
+        let my = max(0, halfH - Config.oppPaddleHalfH * Config.aiWallInsetPaddles)
         ox = max(-mx, min(mx, ox))
         oy = max(-my, min(my, oy))
     }
@@ -1326,10 +1362,11 @@ final class GameScene: SKScene {
     private func setTouchTarget(_ loc: CGPoint) {
         let wx = loc.x - proj.center.x
         let wy = loc.y - proj.center.y
-        touchTarget = CGPoint(x: wx, y: wy)
-        px = wx
-        py = wy
-        clampPlayer()
+        // Target only — stepPlayer lerps so velocity/curve stay meaningful.
+        let mx = max(0, halfW - Config.playerPaddleHalfW)
+        let my = max(0, halfH - Config.playerPaddleHalfH)
+        touchTarget = CGPoint(x: max(-mx, min(mx, wx)),
+                              y: max(-my, min(my, wy)))
     }
 
     // MARK: - Touch: elastic trackpad (iOS)
@@ -1371,9 +1408,8 @@ final class GameScene: SKScene {
             dragAnchorPaddle = CGPoint(x: clampedX, y: clampedY)
         }
 
+        // Target only — stepPlayer owns position + velocity smoothing.
         touchTarget = CGPoint(x: clampedX, y: clampedY)
-        px = clampedX
-        py = clampedY
     }
 
     /// Mac Catalyst: paddle follows the mouse with no click held.
@@ -1395,6 +1431,18 @@ final class GameScene: SKScene {
             return
         }
 
+        // Level-clear bank decays while the ball is live (rewards fast clears).
+        bonuses.tickLevelClear(dt: dt, decayPerSecond: Config.levelClearDecayPerSecond)
+
+        // Curve integration BEFORE position — banana arc (dt-based decay).
+        CourtMath.applyCurveStep(
+            vx: &vx, vy: &vy, vz: &vz,
+            curveX: &curveX, curveY: &curveY,
+            dt: dt,
+            curveDecayPerSecond: Config.curveDecayPerSecond,
+            minVzFraction: Config.minVzFraction
+        )
+
         let prevX = bx, prevY = by, prevZ = bz
         bx += vx * dt
         by += vy * dt
@@ -1406,13 +1454,35 @@ final class GameScene: SKScene {
         ballSpin -= (vx / max(Config.ballRadius, 1)) * dt * Config.ballSpinFactor
 
         // Wall bounces: positional reflection keeps the ball inside the court
-        // even on a long frame.
+        // even on a long frame. Flip + damp curve on the reflected axis.
         let effW = halfW - Config.ballRadius
         let effH = halfH - Config.ballRadius
-        if bx > effW { bx = 2 * effW - bx; vx = -vx; wallBounce() }
-        else if bx < -effW { bx = -2 * effW - bx; vx = -vx; wallBounce() }
-        if by > effH { by = 2 * effH - by; vy = -vy; wallBounce() }
-        else if by < -effH { by = -2 * effH - by; vy = -vy; wallBounce() }
+        if bx > effW {
+            bx = 2 * effW - bx; vx = -vx
+            CourtMath.wallBounceCurve(curveX: &curveX, curveY: &curveY,
+                                      flipX: true, flipY: false,
+                                      damp: Config.curveWallDamp)
+            wallBounce()
+        } else if bx < -effW {
+            bx = -2 * effW - bx; vx = -vx
+            CourtMath.wallBounceCurve(curveX: &curveX, curveY: &curveY,
+                                      flipX: true, flipY: false,
+                                      damp: Config.curveWallDamp)
+            wallBounce()
+        }
+        if by > effH {
+            by = 2 * effH - by; vy = -vy
+            CourtMath.wallBounceCurve(curveX: &curveX, curveY: &curveY,
+                                      flipX: false, flipY: true,
+                                      damp: Config.curveWallDamp)
+            wallBounce()
+        } else if by < -effH {
+            by = -2 * effH - by; vy = -vy
+            CourtMath.wallBounceCurve(curveX: &curveX, curveY: &curveY,
+                                      flipX: false, flipY: true,
+                                      damp: Config.curveWallDamp)
+            wallBounce()
+        }
 
         // --- Paddle collisions, sampled by z-crossing ---------------------
         // World-space rect + ball radius + slop (glow made the paddle look
@@ -1432,10 +1502,9 @@ final class GameScene: SKScene {
                 hitPaddle(xc: xc, yc: yc, cx: px, cy: py,
                           paddleHalfW: Config.playerPaddleHalfW,
                           paddleHalfH: Config.playerPaddleHalfH,
-                          newZ: 0.1, outbound: true)
+                          paddleVelX: playerVelX, paddleVelY: playerVelY,
+                          newZ: 0.1, outbound: true, awardScore: true)
                 rallyHits += 1
-                score += Config.scorePerHit * level
-                updateScoreHUD()
                 Haptics.shared.paddleHit()
                 Audio.shared.paddleHit(player: true)
             } else {
@@ -1453,7 +1522,8 @@ final class GameScene: SKScene {
                 hitPaddle(xc: xc, yc: yc, cx: ox, cy: oy,
                           paddleHalfW: Config.oppPaddleHalfW,
                           paddleHalfH: Config.oppPaddleHalfH,
-                          newZ: Config.zFar - 0.1, outbound: false)
+                          paddleVelX: oppVelX, paddleVelY: oppVelY,
+                          newZ: Config.zFar - 0.1, outbound: false, awardScore: false)
                 Haptics.shared.paddleHit()
                 Audio.shared.paddleHit(player: false)
             } else {
@@ -1472,18 +1542,51 @@ final class GameScene: SKScene {
 
     private func hitPaddle(xc: CGFloat, yc: CGFloat, cx: CGFloat, cy: CGFloat,
                            paddleHalfW: CGFloat, paddleHalfH: CGFloat,
-                           newZ: CGFloat, outbound: Bool) {
+                           paddleVelX: CGFloat, paddleVelY: CGFloat,
+                           newZ: CGFloat, outbound: Bool, awardScore: Bool) {
         let speed = sqrt(vx * vx + vy * vy + vz * vz)
-        // English: full capability always; eng * speed grows as the game speeds up.
-        let nX = max(-1, min(1, (xc - cx) / paddleHalfW))
-        let nY = max(-1, min(1, (yc - cy) / paddleHalfH))
+        // Contact-offset english (demoted) + paddle-velocity curve (dominant).
+        let nX = max(-1, min(1, (xc - cx) / max(paddleHalfW, 1)))
+        let nY = max(-1, min(1, (yc - cy) / max(paddleHalfH, 1)))
         let corner = abs(nX) * abs(nY)
         let eng = englishStrength() * (1 + Config.serveCornerBoost * corner * 0.55)
         vx += nX * eng * speed
         vy += nY * eng * speed
         vz = outbound ? abs(vz) : -abs(vz)
+
+        // Player (outbound): invert brush English — matches Curveball `(-pSpeedX, …)`.
+        // AI (inbound): same-direction — matches Curveball enemy `(+eSpeedX, …)`.
+        let c = CourtMath.curveFromPaddleVelocity(
+            paddleVelX: paddleVelX, paddleVelY: paddleVelY,
+            scale: Config.curveFromPaddleVel, maxMag: Config.curveMax,
+            invert: outbound)
+        curveX = c.0
+        curveY = c.1
+
         bx = xc; by = yc; bz = newZ
         applySpeed(targetSpeed())
+
+        if awardScore {
+            let result = HitScoring.scorePlayerHit(
+                bonuses: &bonuses,
+                curveX: curveX, curveY: curveY,
+                curveBonusThreshold: Config.curveBonusThreshold,
+                curveSuperThreshold: Config.curveSuperThreshold,
+                offsetFracX: nX, offsetFracY: nY,
+                accuracyWindowFrac: Config.accuracyWindowFrac,
+                hitDegrade: Config.hitScoreDegrade,
+                curveDegrade: Config.curveBonusDegrade,
+                superDegrade: Config.superCurveBonusDegrade,
+                accuracyDegrade: Config.accuracyBonusDegrade
+            )
+            score += result.points
+            updateScoreHUD()
+            // Show the flashiest popup that applied (super > curve > perfect).
+            if let top = result.popups.first {
+                showBonusPopup(top)
+            }
+        }
+
         // Outbound = you struck (near plane); inbound return = opponent struck.
         flashPaddle(outbound ? playerPaddleNode : oppPaddleNode)
         pulseRing(atZ: newZ)
@@ -1521,6 +1624,8 @@ final class GameScene: SKScene {
         // Between points / before serve: park center.
         if !ballLive {
             ox = 0; oy = 0
+            oppVelX = 0; oppVelY = 0
+            prevOx = ox; prevOy = oy
             return
         }
 
@@ -1535,10 +1640,23 @@ final class GameScene: SKScene {
         ox = CourtMath.moveToward(ox, target: tx, maxStep: step)
         oy = CourtMath.moveToward(oy, target: ty, maxStep: step)
 
-        let mx = max(0, halfW - Config.oppPaddleHalfW)
-        let my = max(0, halfH - Config.oppPaddleHalfH)
+        // D1: center stays half a paddle-width off the wall beyond flush so
+        // wall-hug shots remain a scoring lane at high levels.
+        let mx = max(0, halfW - Config.oppPaddleHalfW * Config.aiWallInsetPaddles)
+        let my = max(0, halfH - Config.oppPaddleHalfH * Config.aiWallInsetPaddles)
         ox = max(-mx, min(mx, ox))
         oy = max(-my, min(my, oy))
+
+        // Paddle velocity from this frame's motion (feeds curve on contact).
+        if dt > 0.0001 {
+            let rawVx = (ox - prevOx) / dt
+            let rawVy = (oy - prevOy) / dt
+            let a = Config.paddleVelSmooth
+            oppVelX = CourtMath.smoothToward(oppVelX, sample: rawVx, alpha: a)
+            oppVelY = CourtMath.smoothToward(oppVelY, sample: rawVy, alpha: a)
+        }
+        prevOx = ox
+        prevOy = oy
     }
 
     // MARK: - Rendering (positions + one perspective scale; no allocations)
@@ -1551,7 +1669,7 @@ final class GameScene: SKScene {
         let oppS = proj.scale(z: Config.zFar)
         oppPaddleNode.setScale(quantizeScale(oppS))
 
-        let ballScale = proj.scale(z: bz) * Config.ballDrawScale
+        let ballScale = proj.scale(z: bz)
         ballNode.position = Config.snapPoint(proj.project(x: bx, y: by, z: bz))
         ballNode.setScale(quantizeScale(ballScale))
         // Spin ticks through discrete sprite frames.
@@ -1586,7 +1704,7 @@ final class GameScene: SKScene {
                 let t = CGFloat(i) / CGFloat(max(Config.trailLength - 1, 1))
                 ghost.isHidden = false
                 ghost.position = Config.snapPoint(proj.project(x: h.x, y: h.y, z: h.z))
-                let s = proj.scale(z: h.z) * Config.ballDrawScale
+                let s = proj.scale(z: h.z)
                     * NodeFactory.lerp(Config.trailScaleHead, Config.trailScaleTail, t)
                 ghost.setScale(quantizeScale(s))
                 // Stepped trail alpha rather than a continuous fade. Hoisted to

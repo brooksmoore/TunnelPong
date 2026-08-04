@@ -1,9 +1,12 @@
 # CyberPong — Status
 
-**Last updated:** 2026-08-02 (Grok) — Landscape + free-aspect court resize.
+**Last updated:** 2026-08-04 (Claude) — v1.5 audited, test harness rewired to real source, installed on device.
 
-> **"WRAPPED" means feature-complete, not gate-satisfied.** The v2 gate below is
-> still CLOSED. Open v1 work: multi-session device play, Config freeze, cold second person.
+> **v1.5 mechanics ship.** Curveball-style continuous curve, degrading score bonuses,
+> pure-logic CLI tests green. v2 multiplayer gate still CLOSED.
+
+### Recent movement
+- **v1.5 "Make It Actually Curve"** (2026-08-04): continuous curve from paddle velocity, renorm-after-curve, self-degrading bonuses + popups, AI wall clamp, face-grid / no-op knobs deleted. CLI: `./bin/test_v1_5.sh` (21 pass, linked against real source). Mac Catalyst + iOS device builds clean.
 
 ---
 
@@ -12,13 +15,14 @@
 | Field | Value |
 |-------|--------|
 | Name | **CyberPong** |
-| Version | **v1 solo — WRAPPED** (feature-complete for solo endless chase) |
+| Version | **v1.5** (curve + scoring teeth; endless solo chase) |
 | Repo | https://github.com/brooksmoore/TunnelPong (private) |
 | Bundle | `com.brooksmoore.tunnelpong` |
 | Platforms | iOS 17+ iPhone/iPad (portrait + landscape) · Mac Catalyst free resize |
 | Format | **Endless high-score chase — no win state.** L1→L10 then hold |
 | Lives | Spare lives: 3 hearts = 4 misses; +1 per level clear, cap 3 |
-| Look | Night gradient sky + stars + moon · neon-pink tunnel wire · chrome titles · pixel actors |
+| Look | Night gradient sky + stars (+ moon still drawn — Brooks decision pending) · neon-pink tunnel wire · chrome titles · pixel actors |
+| Curve | Continuous banana arc (`curveX/Y` + dt exponential decay); paddle-velocity sourced |
 | Audio | Procedural retrowave (`Audio.swift`) — ambient pad + SFX, zero asset files |
 | Icon | Procedural `bin/make-icon.swift` → Assets.xcassets |
 
@@ -81,5 +85,6 @@ Multi-session device play · Config freeze · cold second-person · (App Store o
 
 ```bash
 /Users/brooksmoore/Desktop/TunnelPong/bin/play-mac.sh
+/Users/brooksmoore/Desktop/TunnelPong/bin/test_v1_5.sh
 open /Users/brooksmoore/Desktop/TunnelPong/TunnelPong.xcodeproj
 ```
