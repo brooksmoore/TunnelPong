@@ -67,15 +67,20 @@ actual assertion — so if a future retune makes it bind, the suite says so.
 Built signed and installed on BCM 16 Pro Max. `PrivacyInfo.xcprivacy` present in
 the bundle; `Products.storekit` correctly absent.
 
-**Open for Brooks:** the E6 moon — still drawn unconditionally in `Nodes.swift` (upper
-right, radius ≈ 1/15 screen width), despite the earlier "no moon" instruction.
-Grok's `docs/v1_5/moon_flag.png` was **not valid evidence** — it captured the
-desktop wallpaper (which has its own moon) behind the app menu bar, the same
-screen-capture trap hit earlier in this project. Deleted rather than committed
-(4.9 MB, public repo). Left in place pending Brooks's call; removal is two lines.
-Also open:
-device feel-tuning of `curveFromPaddleVel` (0.55 shipped; try 0.60–0.65 if swipes
-read weak on ProMotion).
+**Moon: RESOLVED — it stays.** Brooks confirmed 2026-08-04 that he likes it. The
+earlier "no mountains or moon" instruction is superseded; mountains gone, moon
+intended. **Do not remove it as a cleanup.** Recorded in `docs/ROADMAP.md` along
+with his v2 idea: a dynamic 8-bit backdrop — passing clouds, or a small figure on
+the moon who cheers when the player hits the ball.
+
+For the record: Grok's `docs/v1_5/moon_flag.png` was **not valid evidence** — it
+captured the desktop wallpaper (which has its own moon) behind the app menu bar,
+the same screen-capture trap hit earlier in this project. Deleted rather than
+committed (4.9 MB, public repo). Moon presence was confirmed by reading
+`Nodes.swift` instead.
+
+**Still open:** device feel-tuning of `curveFromPaddleVel` (0.55 shipped; try
+0.60–0.65 if swipes read weak on ProMotion).
 
 ---
 

@@ -89,6 +89,13 @@ enum NodeFactory {
             }
 
             // Crescent moon (upper right), mirrored on Y so the open face flips.
+            //
+            // KEEP. Brooks confirmed 2026-08-04 he wants the moon. An earlier
+            // "no mountains or moon" note in this project's history is
+            // superseded — the mountains went, the moon stayed on purpose.
+            // It is also the anchor for the planned dynamic backdrop
+            // (see docs/ROADMAP.md → "Living backdrop"). Do not delete as
+            // dead art in a cleanup pass.
             let moonCX = Int(CGFloat(tw) * 0.78)
             let moonCY = Int(CGFloat(th) * 0.16)
             let moonR = max(5, Int(CGFloat(tw) * Config.moonRadiusFrac))

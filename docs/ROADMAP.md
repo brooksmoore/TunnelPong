@@ -156,3 +156,44 @@ v3 is likely **more work than v1+v2 combined** and delivers the least of “play
 v1 lock (gate) → v2 local Multipeer 1v1 → (optional) solo leaderboards / ghost
                                          → v3 only if people ask for online
 ```
+
+---
+
+## Living backdrop (post-v1.5 idea, not scheduled)
+
+**Decision on the moon: it stays.** Brooks confirmed 2026-08-04 that he likes it.
+An earlier instruction in this project said "no mountains or moon"; the mountains
+went, the moon stayed, and that is now the intended state. **Do not remove the
+crescent in `Nodes.swift` as a cleanup.** It is the anchor for everything below.
+
+The backdrop is currently one static procedural texture baked once at launch
+(gradient bands + deterministic starfield + crescent). The idea is to make it
+*react* without breaking the 8-bit discipline or the cost profile.
+
+Concepts, in Brooks's words:
+
+1. **Passing clouds** — slow 8-bit cloud sprites drifting across the sky band.
+   Ambient, always moving, indifferent to play.
+2. **A little guy on the moon who cheers when you hit the ball** — a few-pixel
+   figure on the crescent that animates on player contact. This is the stronger
+   idea: it turns the backdrop into *feedback* rather than decoration, and it
+   pays off the exact moment the player did something right.
+
+Design constraints any implementation must respect:
+
+- **The backdrop must never compete with the ball.** It sits behind a tunnel the
+  player is tracking depth through; motion near the court centre will hurt. Keep
+  activity in the outer sky, away from the tunnel mouth.
+- **Stay on the pixel grid** (`Config.pixel`) and in the existing palette. A
+  smoothly-tweened cloud would look wrong next to hard-snapped everything else.
+- **Frame budget.** The current backdrop is baked once precisely because
+  regenerating it per frame is expensive. Animate *sprites over* the baked
+  texture; do not re-bake the texture per frame.
+- **Config-only tuning**, same as everything else.
+- The cheer should read as reward, so it belongs on the **player** hit, and
+  probably on bonus hits specifically — cheering for every routine return would
+  flatten it into noise.
+
+Open question worth answering before building: does the cheer fire on every
+player contact, or only when a bonus pops? The second is likely better — it
+gives the existing bonus system a second, wordless channel.
