@@ -16,12 +16,12 @@
 |-------|--------|
 | Name | **CyberPong** |
 | Version | **v1.5** (curve + scoring teeth; endless solo chase) |
-| Repo | https://github.com/brooksmoore/TunnelPong (private) |
+| Repo | https://github.com/brooksmoore/TunnelPong (public) |
 | Bundle | `com.brooksmoore.tunnelpong` |
 | Platforms | iOS 17+ iPhone/iPad (portrait + landscape) · Mac Catalyst free resize |
 | Format | **Endless high-score chase — no win state.** L1→L10 then hold |
 | Lives | Spare lives: 3 hearts = 4 misses; +1 per level clear, cap 3 |
-| Look | Night gradient sky + stars (+ moon still drawn — Brooks decision pending) · neon-pink tunnel wire · chrome titles · pixel actors |
+| Look | Night gradient sky + stars (+ crescent moon — KEEP, confirmed 2026-08-04) · neon-pink tunnel wire · chrome titles · pixel actors |
 | Curve | Continuous banana arc (`curveX/Y` + dt exponential decay); paddle-velocity sourced |
 | Audio | Procedural retrowave (`Audio.swift`) — ambient pad + SFX, zero asset files |
 | Icon | Procedural `bin/make-icon.swift` → Assets.xcassets |
@@ -64,7 +64,7 @@
 - Trail alphas hoisted out of frame loop.
 
 ### Still open for v1 (human gate)
-Multi-session device play · Config freeze · cold second-person · (App Store only: PrivacyInfo).
+Multi-session device play · Config freeze · cold second-person. (PrivacyInfo + StoreKit shipped.)
 
 ---
 
