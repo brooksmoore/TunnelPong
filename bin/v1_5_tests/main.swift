@@ -194,6 +194,25 @@ do {
           !CourtMath.firstTouchGoesToPlayer(playerWonLastPoint: false))
 }
 
+// 9. Surface HUD type stays inside one wall segment.
+print("\n9) Surface HUD type depth (v1.9)")
+do {
+    let zEnd = Config.hudSurfaceZFar
+    let ring1 = Config.zFar * CourtMath.ringT(index: 1, ringCount: Config.ringCount)
+    check("type ends on the second ring, not past it", zEnd <= ring1 + 0.001,
+          detail: "zFar=\(zEnd) ring1=\(ring1)")
+    check("type starts before it ends", Config.hudSurfaceZNear < zEnd,
+          detail: "near=\(Config.hudSurfaceZNear) far=\(zEnd)")
+    check("type starts at or after the near wall", Config.hudSurfaceZNear >= 0)
+
+    // The whole point is that it fills roughly one wall segment — if the span
+    // ever grows past ~1.2 segments it will read as sprawling again.
+    let segment = ring1
+    check("span is about one wall segment",
+          (zEnd - Config.hudSurfaceZNear) <= segment * 1.2,
+          detail: "span=\(zEnd - Config.hudSurfaceZNear) segment=\(segment)")
+}
+
 // D2 — AI lateral safety ceiling, computed from real Config endpoints.
 print("\n--- D2 aiLateralFrac ceiling (real Config) ---")
 print("LVL  rawAI  latFrac  ceiling  binds?")

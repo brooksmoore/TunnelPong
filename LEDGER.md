@@ -5,6 +5,37 @@ Audience: Brooks + any AI (Claude, Grok, Composer) picking up the project.
 
 ---
 
+## 2026-08-04 — v1.9 "One Segment" (Claude)
+
+**Source:** Brooks, with a device screenshot of v1.8. Depth dot approved. Surface
+type liked but too tall — should span "between the first and second wall".
+
+### Change
+`hudSurfaceZFar` is no longer a raw number. It is now derived from
+`hudSurfaceEndRing` (= 1) through `CourtMath.ringT`, so the type ends **exactly
+on the second ring** and fills one wall segment. Depth 300 → 112.5.
+
+Measured effect: near-edge scale is unchanged at 0.966, far-edge rises 0.483 →
+0.713, so the on-screen vertical span drops to **52%** of v1.8. Glyph sizes were
+left alone — the sprawl was depth, not point size.
+
+Expressing this as a ring index rather than a depth is the actual fix. It is why
+the type reads as *part of* the floor and ceiling: it fills one wall segment by
+construction, and it keeps doing so if `ringCount` or `zFar` ever change.
+
+### Tests
+Four assertions added (33 total): the type ends on or before the second ring,
+starts before it ends, starts at or after the near wall, and spans no more than
+~1.2 wall segments. **Failure proven:** setting `hudSurfaceEndRing = 3` turns two
+red; reverting turns them green. That guard is the point — the sprawl this
+release fixes is now impossible to reintroduce silently.
+
+### Not verified
+Appearance still unverified on this machine (no Screen Recording permission).
+The 52% figure is computed from the projection, not observed. Brooks to judge.
+
+---
+
 ## 2026-08-04 — v1.8 "Surface Type" (Claude)
 
 **Source:** Brooks, with device screenshots. Depth dash read as clunky; pause and

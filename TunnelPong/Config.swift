@@ -300,8 +300,16 @@ struct Config {
 
     /// Depth of the type's near edge (0 = right at the near wall).
     static let hudSurfaceZNear: CGFloat = 10
-    /// Depth of the far edge. Larger = more dramatic recession, less legible.
-    static let hudSurfaceZFar: CGFloat = 300
+    /// Far edge of the surface type, expressed as a **ring index** rather than a
+    /// raw depth so it tracks the tunnel's own spacing: 1 means the type ends
+    /// exactly on the second ring. Tying it to the rings is what keeps the type
+    /// visually "part of" the floor and ceiling — it fills one wall segment, and
+    /// it keeps doing so if `ringCount` or `zFar` ever change.
+    static let hudSurfaceEndRing: Int = 1
+    /// Depth of the far edge, derived from `hudSurfaceEndRing`.
+    static var hudSurfaceZFar: CGFloat {
+        zFar * CourtMath.ringT(index: hudSurfaceEndRing, ringCount: ringCount)
+    }
     /// World units per label point, horizontally. Above 1 widens the type.
     static let hudSurfaceWidthScale: CGFloat = 1.35
     /// Glyph heights. Bigger than flat HUD text because perspective shrinks the
