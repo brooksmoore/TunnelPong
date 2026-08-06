@@ -96,6 +96,28 @@ final class PixelLabel: SKNode {
     private var wantsShadow = false
     private var style: Style = .plain
 
+    /// Paint the glyphs onto a receding tunnel surface (floor or ceiling)
+    /// instead of flat on the screen plane.
+    ///
+    /// Each glyph pixel is mapped through the *same* perspective divide the
+    /// tunnel uses, so the type genuinely lies on the surface rather than being
+    /// a squashed approximation of it: rows nearer the camera are taller and
+    /// wider, and every row lands at the screen height that surface would have
+    /// at that depth. Set `surface = nil` for ordinary flat HUD text.
+    struct SurfaceProjection {
+        var focal: CGFloat
+        var zNear: CGFloat
+        var zFar: CGFloat
+        /// World y of the surface: +halfH for the ceiling, -halfH for the floor.
+        var surfaceY: CGFloat
+        /// World units per label point, horizontally.
+        var widthScale: CGFloat
+        /// True when the glyph's top edge is the near edge (ceiling); false when
+        /// its bottom edge is (floor).
+        var nearAtTop: Bool
+    }
+    var surface: SurfaceProjection? { didSet { rebuild() } }
+
     private(set) var pixelSize: CGFloat = 3
     var tracking: CGFloat = 1 { didSet { rebuild() } }
     var hAlign: HAlign = .center { didSet { rebuild() } }
@@ -181,6 +203,33 @@ final class PixelLabel: SKNode {
             + (n - 1) * tracking * pixelSize
     }
 
+    /// Map a label-local point onto the configured tunnel surface.
+    private func project(_ p: CGPoint, _ sp: SurfaceProjection, halfTextHeight h: CGFloat) -> CGPoint {
+        // u: 0 at the glyph's bottom edge, 1 at its top edge.
+        let u = h > 0 ? (p.y + h) / (2 * h) : 0
+        // Whichever edge is "near" gets the small z.
+        let t = sp.nearAtTop ? (1 - u) : u
+        let z = sp.zNear + (sp.zFar - sp.zNear) * t
+        let scale = sp.focal / max(sp.focal + z, 0.001)
+        return CGPoint(x: p.x * sp.widthScale * scale,
+                       y: sp.surfaceY * scale)
+    }
+
+    /// Add one glyph pixel — a flat rect, or a perspective-mapped quad.
+    private func addCell(_ rect: CGRect, to path: CGMutablePath,
+                         _ sp: SurfaceProjection?, halfTextHeight h: CGFloat) {
+        guard let sp else { path.addRect(rect); return }
+        let bl = project(CGPoint(x: rect.minX, y: rect.minY), sp, halfTextHeight: h)
+        let br = project(CGPoint(x: rect.maxX, y: rect.minY), sp, halfTextHeight: h)
+        let tr = project(CGPoint(x: rect.maxX, y: rect.maxY), sp, halfTextHeight: h)
+        let tl = project(CGPoint(x: rect.minX, y: rect.maxY), sp, halfTextHeight: h)
+        path.move(to: bl)
+        path.addLine(to: br)
+        path.addLine(to: tr)
+        path.addLine(to: tl)
+        path.closeSubpath()
+    }
+
     private func rebuild() {
         let px = pixelSize
         let total = contentWidth
@@ -207,15 +256,15 @@ final class PixelLabel: SKNode {
                     let rect = CGRect(x: ox + CGFloat(c) * px,
                                       y: top - CGFloat(r + 1) * px,
                                       width: px, height: px)
-                    full.addRect(rect)
+                    addCell(rect, to: full, surface, halfTextHeight: top)
                     // 3-band chrome: bright pink → magenta → dark purple (top→bot).
                     let band = CGFloat(r) / CGFloat(max(PixelFont.rows - 1, 1))
                     if band < 0.34 {
-                        topPath.addRect(rect)
+                        addCell(rect, to: topPath, surface, halfTextHeight: top)
                     } else if band < 0.67 {
-                        midPath.addRect(rect)
+                        addCell(rect, to: midPath, surface, halfTextHeight: top)
                     } else {
-                        botPath.addRect(rect)
+                        addCell(rect, to: botPath, surface, halfTextHeight: top)
                     }
                 }
             }

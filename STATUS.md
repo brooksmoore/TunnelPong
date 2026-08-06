@@ -1,11 +1,12 @@
 # CyberPong — Status
 
-**Last updated:** 2026-08-04 (Claude) — v1.7 depth tracker + pause moved, 33 assertions green, installed on device.
+**Last updated:** 2026-08-04 (Claude) — v1.8 depth dot + HUD type on tunnel surfaces, 29 assertions green, installed on device.
 
 > **v1.6 mechanics ship.** Centre-start rallies, Curveball-style continuous curve, degrading score bonuses,
 > pure-logic CLI tests green. v2 multiplayer gate still CLOSED.
 
 ### Recent movement
+- **v1.8 "Surface Type"** (2026-08-04): depth tracker simplified to a small dot in the wall-impact colour; LVL and score projected onto the ceiling and floor planes via `PixelLabel.SurfaceProjection` (equidistance falls out of the geometry); pause moved bottom-right at 0.85. **Appearance not verified — no Screen Recording permission.**
 - **v1.7 "Depth Readout"** (2026-08-04): four dashes ride the corner rails at the ball's z, in the ball's colour, giving the missing z-axis cue. x/y walls still stay dark until individually struck (deliberate). Pause moved to bottom-right at 0.85 alpha. 33 assertions green. **Visual result not verified — no Screen Recording permission; Brooks to judge on device.**
 - **v1.6 "Centre Start"** (2026-08-04): every point now launches from dead centre of the tunnel toward whoever won the previous point. Swipe-to-serve removed entirely — your opening move is a return. Rally rules extracted to `CourtMath` so they're testable; 29 assertions green, sign-flip failure proven.
 - **v1.5 "Make It Actually Curve"** (2026-08-04): continuous curve from paddle velocity, renorm-after-curve, self-degrading bonuses + popups, AI wall clamp, face-grid / no-op knobs deleted. CLI: `./bin/test_v1_5.sh` (21 pass, linked against real source). Mac Catalyst + iOS device builds clean.
@@ -17,7 +18,7 @@
 | Field | Value |
 |-------|--------|
 | Name | **CyberPong** |
-| Version | **v1.7** (depth tracker; centre start; curve + scoring teeth; endless solo chase) |
+| Version | **v1.8** (surface HUD type; depth dot; centre start; curve + scoring; endless solo chase) |
 | Repo | https://github.com/brooksmoore/TunnelPong (public) |
 | Bundle | `com.brooksmoore.tunnelpong` |
 | Platforms | iOS 17+ iPhone/iPad (portrait + landscape) · Mac Catalyst free resize |

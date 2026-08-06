@@ -5,6 +5,48 @@ Audience: Brooks + any AI (Claude, Grok, Composer) picking up the project.
 
 ---
 
+## 2026-08-04 — v1.8 "Surface Type" (Claude)
+
+**Source:** Brooks, with device screenshots. Depth dash read as clunky; pause and
+HUD type notes.
+
+### Depth tracker simplified
+Replaced the long perspective dash with a **small square dot** per corner rail,
+recoloured to `ringHitColor` — the same colour a wall flashes when struck — so
+the two cues read as one family while staying separate channels. The dot still
+scales with perspective (floored at `depthDotMinScale` so it survives the far
+wall), which keeps the acceleration-as-timing-cue property without the bulk.
+
+Removed `CourtMath.depthTickSpan` and its four assertions along with the dash;
+they tested geometry that no longer exists. Suite back to 29.
+
+### Pause button
+Bottom-right corner, on the safe-area floor, alpha 0.4 → 0.85.
+
+### HUD type on the tunnel surfaces
+LVL and the score are now **projected onto the ceiling and floor planes** rather
+than drawn flat over them. `PixelLabel.SurfaceProjection` maps every glyph pixel
+through the same perspective divide the tunnel uses, emitting quads instead of
+rects — so the type genuinely lies on the surface: near rows taller and wider,
+each row at the screen height that surface actually has at that depth.
+
+Both labels anchor to their own wall (`+halfH` / `-halfH`) over the same
+zNear/zFar span, so **the equidistance Brooks asked for falls out of the geometry
+rather than being tuned per device** — it holds across portrait, landscape, and
+free Mac resize automatically. Sizes raised to `hudLevelSize` 30 / `hudScoreSize`
+38 (these are near-edge sizes; perspective shrinks the far rows).
+
+`hudTopGap` deleted — the level label no longer uses a flat offset.
+
+### Not verified
+**Appearance again untested.** Screen Recording permission is still missing on
+this Mac, so `screencapture` returns the desktop wallpaper rather than the app.
+Typecheck, dead-knob sweep, and the 29 logic assertions pass; how it *looks* is
+Brooks's call. Likely knobs if the type reads badly: `hudSurfaceZFar` (recession
+depth — the main legibility lever), `hudSurfaceWidthScale`, and the two sizes.
+
+---
+
 ## 2026-08-04 — v1.7 "Depth Readout" (Claude)
 
 **Source:** Brooks, after playing v1.6. Two asks: move the pause button, and add

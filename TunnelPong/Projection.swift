@@ -173,28 +173,6 @@ enum CourtMath {
         towardPlayer ? -abs(magnitude) : abs(magnitude)
     }
 
-    /// Span of the depth-tracker dash along z, clamped to the drawable rail.
-    ///
-    /// Returns (near, far) in world z. The clamp matters at both ends: past
-    /// `zFar` there is no rail to draw on, and behind `nearLimit` the rail
-    /// anchors collapse to a single point, which would silently shrink the
-    /// marker to nothing exactly when the ball is closest and timing matters
-    /// most. Guarantees a non-degenerate span for any ball z on the court.
-    static func depthTickSpan(
-        ballZ: CGFloat, halfZ: CGFloat, nearLimit: CGFloat, zFar: CGFloat
-    ) -> (near: CGFloat, far: CGFloat) {
-        let h = abs(halfZ)
-        var near = max(ballZ - h, nearLimit)
-        var far = min(ballZ + h, zFar)
-        if far <= near {
-            // Degenerate only if the clamps cross; keep a visible sliver.
-            let mid = min(max(ballZ, nearLimit), zFar)
-            near = max(nearLimit, mid - 1)
-            far = min(zFar, max(near + 1, mid + 1))
-        }
-        return (near, far)
-    }
-
     /// Who receives the first touch of the next point.
     ///
     /// The ball always goes first toward whoever **won** the previous point:

@@ -78,31 +78,26 @@ struct Config {
 
     // MARK: - Depth tracker (z-axis readout on the corner rails)
     //
-    // A 2D screen can show x and y directly but not z, and the hardest read in
-    // the game is *when* the ball will arrive at your plane. The four corner
-    // rails are the only geometry that runs along z, so that is where the
-    // answer belongs.
+    // A 2D screen shows x and y directly but not z, and the hardest read in the
+    // game is *when* the ball reaches your plane. The four corner rails are the
+    // only geometry running along z, so a small dot rides each one at the ball's
+    // current depth.
     //
     // Deliberately NOT a wall glow: the x/y walls stay dark until individually
-    // struck, which is what makes an impact read as an impact. This marker is a
-    // separate channel — it rides the rails, in the ball's own colour, so the
-    // eye reads "that is the ball's depth" rather than "that wall was hit".
+    // struck, which is what makes an impact read as an impact. The dot borrows
+    // the *impact* colour so the two cues feel like one family, while staying a
+    // separate channel.
     //
-    // Because the marker spans a fixed range in *world* z, perspective makes it
-    // short and slow while far away and long and fast as it arrives — the
-    // acceleration itself is the timing cue.
+    // Kept small and simple on purpose — a long dash read as clunky. The dot
+    // scales with perspective, so its own acceleration is the timing cue.
 
-    /// Half-length of the marker along z, in world units.
-    static let depthTickHalfZ: CGFloat = 40
-    /// Core stroke width, in points.
-    static let depthTickWidth: CGFloat = 5
-    /// Wider, dimmer stroke behind the core — a hard two-step 8-bit glow rather
-    /// than a soft blur, to match the rest of the art.
-    static let depthTickHaloWidth: CGFloat = 11
-    static let depthTickAlpha: CGFloat = 1.0
-    static let depthTickHaloAlpha: CGFloat = 0.30
-    /// Marker colour. Tied to the ball on purpose — same object, two readouts.
-    static let depthTickColor = ballColor
+    /// Dot radius in points at the near plane (z = 0).
+    static let depthDotRadius: CGFloat = 5
+    /// Floor on the perspective scale so the dot never vanishes at the far wall.
+    static let depthDotMinScale: CGFloat = 0.42
+    static let depthDotAlpha: CGFloat = 0.95
+    /// Same colour as a struck wall — one visual family, two channels.
+    static let depthDotColor = ringHitColor
 
     /// Line width for ring index 0…ringCount-1 (0 = nearest / player plane).
     static func ringLineWidth(index: Int) -> CGFloat {
@@ -294,13 +289,32 @@ struct Config {
     /// Pad under the Dynamic Island / safe top for level + score (hearts sit higher).
     static let hudTopPad: CGFloat = 6
     static let hudBottomPad: CGFloat = 10
+    // MARK: - HUD type on the tunnel surfaces
+    //
+    // LVL and the score are painted onto the ceiling and floor rather than
+    // floating flat over them, so they read as part of the tunnel. Both use the
+    // same zNear/zFar span, and both anchor to their own wall (+halfH / -halfH),
+    // which is what makes them equidistant from those walls at any screen size
+    // or orientation — the symmetry falls out of the geometry instead of being
+    // hand-tuned per device.
+
+    /// Depth of the type's near edge (0 = right at the near wall).
+    static let hudSurfaceZNear: CGFloat = 10
+    /// Depth of the far edge. Larger = more dramatic recession, less legible.
+    static let hudSurfaceZFar: CGFloat = 300
+    /// World units per label point, horizontally. Above 1 widens the type.
+    static let hudSurfaceWidthScale: CGFloat = 1.35
+    /// Glyph heights. Bigger than flat HUD text because perspective shrinks the
+    /// far rows — these are the *near*-edge sizes.
+    static let hudLevelSize: CGFloat = 30
+    static let hudScoreSize: CGFloat = 38
+
     /// Pause glyph opacity. It sits in the bottom-right corner away from the
     /// tunnel, so it can be legible without competing with the ball.
     static let pauseButtonAlpha: CGFloat = 0.85
     /// Mac Catalyst titlebar eats the top of the content view; treat as min top inset.
     static let macTitlebarInset: CGFloat = 40
     /// Extra gap below hearts / court top when placing the LVL chrome label.
-    static let hudTopGap: CGFloat = 22
 
     // MARK: - Type (procedural 5×7 pixel font — r1 chrome/neon title style)
     /// Blank columns between glyphs, in blocks. Tight like OVERDRIVE lettering.

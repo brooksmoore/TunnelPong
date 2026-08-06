@@ -101,10 +101,9 @@ final class GameScene: SKScene {
     private var rings: [SKShapeNode] = []
     private var depthPanels: [SKShapeNode] = []
     private var railSegments: [SKShapeNode] = []
-    /// Depth tracker: bright dashes riding the four corner rails at the ball's z.
+    /// Depth tracker: small dots riding the four corner rails at the ball's z.
     /// Index order matches the (sx, sy) corner loop in `rebuildTunnelGeometry`.
-    private var depthTicks: [SKShapeNode] = []
-    private var depthTickHalos: [SKShapeNode] = []
+    private var depthDots: [SKShapeNode] = []
     private var ringPulses: [SKAction] = []
     private var pauseDim: SKSpriteNode!
     private var scanlineNode: SKSpriteNode!
@@ -427,16 +426,28 @@ final class GameScene: SKScene {
         let heartsY = heartsBandY()
         hudPlayerLives.position = CGPoint(x: sidePad, y: heartsY)
         hudOppLives.position = CGPoint(x: size.width - sidePad, y: heartsY)
-        let lvlY = min(heartsY - 22, courtTopY - Config.hudTopGap)
-        hudLevelLabel.position = CGPoint(x: cx, y: lvlY)
+        // LVL is painted on the ceiling, the score on the floor. Each anchors to
+        // its own wall, so both sit the same distance from their wall by
+        // construction rather than by tuning.
+        hudLevelLabel.surface = PixelLabel.SurfaceProjection(
+            focal: Config.focal,
+            zNear: Config.hudSurfaceZNear,
+            zFar: Config.hudSurfaceZFar,
+            surfaceY: halfH,
+            widthScale: Config.hudSurfaceWidthScale,
+            nearAtTop: true)
+        hudLevelLabel.position = proj.center
 
-        // Score sits just above the court floor (inside the play band).
         let courtFloor = proj.center.y - halfH
-        let scoreY = courtFloor + 34
-        let minFloor = botSafe + Config.hudBottomPad + 36
-        let safeScoreY = max(scoreY, minFloor + 28)
 
-        hudScoreLabel.position = CGPoint(x: cx, y: safeScoreY)
+        hudScoreLabel.surface = PixelLabel.SurfaceProjection(
+            focal: Config.focal,
+            zNear: Config.hudSurfaceZNear,
+            zFar: Config.hudSurfaceZFar,
+            surfaceY: -halfH,
+            widthScale: Config.hudSurfaceWidthScale,
+            nearAtTop: false)
+        hudScoreLabel.position = proj.center
         // Pause lives in the bottom-right corner, clear of the tunnel mouth and
         // under the thumb. Sits on the safe-area floor, not the court floor.
         pauseButton.position = CGPoint(x: size.width - sidePad - 8,
@@ -544,30 +555,19 @@ final class GameScene: SKScene {
             railSegments.append(rail)
         }
 
-        // Depth tracker: one halo + one core per corner. Above the rails but
-        // below the ball, so the ball always wins where they overlap.
+        // Depth tracker: one dot per corner rail. Above the rails but below the
+        // ball, so the ball always wins where they overlap.
         for _ in 0..<4 {
-            let halo = SKShapeNode()
-            halo.isAntialiased = false
-            halo.lineCap = .butt
-            halo.strokeColor = Config.depthTickColor
-            halo.lineWidth = Config.depthTickHaloWidth
-            halo.alpha = Config.depthTickHaloAlpha
-            halo.zPosition = 4
-            halo.isHidden = true
-            worldNode.addChild(halo)
-            depthTickHalos.append(halo)
-
-            let core = SKShapeNode()
-            core.isAntialiased = false
-            core.lineCap = .butt
-            core.strokeColor = Config.depthTickColor
-            core.lineWidth = Config.depthTickWidth
-            core.alpha = Config.depthTickAlpha
-            core.zPosition = 5
-            core.isHidden = true
-            worldNode.addChild(core)
-            depthTicks.append(core)
+            let r = Config.depthDotRadius
+            let dot = SKShapeNode(rect: CGRect(x: -r, y: -r, width: 2 * r, height: 2 * r))
+            dot.isAntialiased = false
+            dot.fillColor = Config.depthDotColor
+            dot.strokeColor = .clear
+            dot.alpha = Config.depthDotAlpha
+            dot.zPosition = 4
+            dot.isHidden = true
+            worldNode.addChild(dot)
+            depthDots.append(dot)
         }
 
         rebuildTunnelGeometry()
@@ -641,11 +641,11 @@ final class GameScene: SKScene {
         hudNode.addChild(hudOppLives)
 
         // Same chrome type as CYBER/PONG title wordmark.
-        hudLevelLabel = NodeFactory.titleLabel("LVL 1", size: 16, color: Config.titleChromeTop)
+        hudLevelLabel = NodeFactory.titleLabel("LVL 1", size: Config.hudLevelSize, color: Config.titleChromeTop)
         hudLevelLabel.alpha = 0.95
         hudNode.addChild(hudLevelLabel)
 
-        hudScoreLabel = NodeFactory.hudLabel("0", size: 22, color: Config.hudColor, alpha: 0.95)
+        hudScoreLabel = NodeFactory.hudLabel("0", size: Config.hudScoreSize, color: Config.hudColor, alpha: 0.95)
         hudNode.addChild(hudScoreLabel)
 
         bonusPopupLabel = NodeFactory.hudLabel("", size: Config.bonusPopupSize,
@@ -1551,48 +1551,35 @@ final class GameScene: SKScene {
 
     // MARK: - Rendering (positions + one perspective scale; no allocations)
 
-    /// Ride a bright dash along each of the four corner rails at the ball's
-    /// current depth.
+    /// Ride a small dot along each of the four corner rails at the ball's depth.
     ///
     /// This is the z-axis readout. The x/y walls deliberately stay dark until
     /// individually struck — that is what makes a wall hit read as a hit — so
-    /// depth gets its own channel on the only geometry that runs along z.
+    /// depth gets its own channel on the only geometry that runs along z. The
+    /// dot borrows the wall-impact colour so the two cues read as one family.
     ///
-    /// The dash spans a fixed range in *world* z, which perspective turns into
-    /// the timing cue: short and creeping while the ball is far, long and
-    /// racing as it arrives at your plane.
+    /// The dot rides the same perspective as everything else, so it creeps
+    /// while the ball is far and accelerates as it arrives. That acceleration
+    /// is the timing cue; it needs no extra length or animation.
     private func updateDepthTracker() {
-        guard !depthTicks.isEmpty else { return }
-        // Visible whenever the ball is: in flight, hanging at centre before a
-        // launch, or frozen on a plane after a point.
-        let show = !ballNode.isHidden
-        guard show else {
-            for n in depthTicks { n.isHidden = true }
-            for n in depthTickHalos { n.isHidden = true }
+        guard !depthDots.isEmpty else { return }
+        guard !ballNode.isHidden else {
+            for d in depthDots { d.isHidden = true }
             return
         }
 
-        // Clamp the span so it never runs past the far wall or behind the
-        // camera-side rail stubs, where railAnchor would clamp both ends to the
-        // same point and collapse the dash to nothing.
-        let span = CourtMath.depthTickSpan(ballZ: bz,
-                                           halfZ: Config.depthTickHalfZ,
-                                           nearLimit: Config.railNearExtendZ,
-                                           zFar: Config.zFar)
-        let zNear = span.near
-        let zFarEnd = span.far
+        let z = min(max(bz, Config.railNearExtendZ), Config.zFar)
+        // Floor the scale so the dot stays visible against the far wall, where
+        // raw perspective would shrink it below a pixel.
+        let sc = max(proj.scale(z: z), Config.depthDotMinScale)
 
         var i = 0
         for sx: CGFloat in [-1, 1] {
             for sy: CGFloat in [-1, 1] {
-                guard i < depthTicks.count else { break }
-                let path = CGMutablePath()
-                path.move(to: Config.snapPoint(railAnchor(sx: sx, sy: sy, z: zNear)))
-                path.addLine(to: Config.snapPoint(railAnchor(sx: sx, sy: sy, z: zFarEnd)))
-                depthTicks[i].path = path
-                depthTicks[i].isHidden = false
-                depthTickHalos[i].path = path
-                depthTickHalos[i].isHidden = false
+                guard i < depthDots.count else { break }
+                depthDots[i].position = Config.snapPoint(railAnchor(sx: sx, sy: sy, z: z))
+                depthDots[i].setScale(sc)
+                depthDots[i].isHidden = false
                 i += 1
             }
         }
