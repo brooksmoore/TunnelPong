@@ -5,6 +5,48 @@ Audience: Brooks + any AI (Claude, Grok, Composer) picking up the project.
 
 ---
 
+## 2026-08-04 — v1.7 "Depth Readout" (Claude)
+
+**Source:** Brooks, after playing v1.6. Two asks: move the pause button, and add
+a z-axis depth cue because it is hard to judge when the ball reaches your plane.
+
+### Pause button
+Moved from beside the score to the **bottom-right corner**, on the safe-area
+floor rather than the court floor, and opacity raised 0.4 → `pauseButtonAlpha`
+0.85. It is now clear of the tunnel mouth and under the thumb.
+
+### Depth tracker
+Four bright dashes ride the corner rails at the ball's current z — a halo stroke
+plus a hard core stroke, in the **ball's own colour**, so the eye reads "that is
+the ball's depth" rather than "that wall was struck".
+
+Deliberate design constraint from Brooks, preserved: **the x/y walls still stay
+dark until individually struck.** He called that a good design choice and it is —
+it is what makes an impact read as an impact. Depth therefore gets its own
+channel on the only geometry that runs along z, instead of being folded into the
+wall-glow the original Curveball used.
+
+The dash spans a fixed range in *world* z, so perspective turns it into the
+timing cue by itself: short and creeping while the ball is far, long and racing
+as it arrives. No extra easing needed — the projection does the work.
+
+### Tests
+`CourtMath.depthTickSpan` extracted so the clamping is reachable from the CLI
+harness. **33 assertions** (up from 29): the span never collapses anywhere on the
+court, never leaves the drawable rail, is clamped at the far wall, and correctly
+straddles the player plane. **Failure proven:** removing the far clamp in the real
+function turned two red; restoring turned them green.
+
+### Not verified
+**The visual result is untested.** `screencapture` on this machine lacks Screen
+Recording permission and returns the desktop wallpaper instead of the app window
+— the identical trap that produced Grok's bogus v1.5 moon screenshot. The
+geometry math is asserted; how it *looks* is not. Brooks to judge on device.
+Likely tuning knobs if it reads wrong: `depthTickHalfZ` (length),
+`depthTickHaloAlpha` (glow strength), `depthTickWidth`.
+
+---
+
 ## 2026-08-04 — v1.6 "Centre Start" (Claude)
 
 **Source:** Brooks, after extended device play. Curve confirmed good on phone; no

@@ -76,6 +76,34 @@ struct Config {
     /// Stroke weight of the past-camera rail stubs (match near rings).
     static let railNearExtendWidth: CGFloat = 3
 
+    // MARK: - Depth tracker (z-axis readout on the corner rails)
+    //
+    // A 2D screen can show x and y directly but not z, and the hardest read in
+    // the game is *when* the ball will arrive at your plane. The four corner
+    // rails are the only geometry that runs along z, so that is where the
+    // answer belongs.
+    //
+    // Deliberately NOT a wall glow: the x/y walls stay dark until individually
+    // struck, which is what makes an impact read as an impact. This marker is a
+    // separate channel — it rides the rails, in the ball's own colour, so the
+    // eye reads "that is the ball's depth" rather than "that wall was hit".
+    //
+    // Because the marker spans a fixed range in *world* z, perspective makes it
+    // short and slow while far away and long and fast as it arrives — the
+    // acceleration itself is the timing cue.
+
+    /// Half-length of the marker along z, in world units.
+    static let depthTickHalfZ: CGFloat = 40
+    /// Core stroke width, in points.
+    static let depthTickWidth: CGFloat = 5
+    /// Wider, dimmer stroke behind the core — a hard two-step 8-bit glow rather
+    /// than a soft blur, to match the rest of the art.
+    static let depthTickHaloWidth: CGFloat = 11
+    static let depthTickAlpha: CGFloat = 1.0
+    static let depthTickHaloAlpha: CGFloat = 0.30
+    /// Marker colour. Tied to the ball on purpose — same object, two readouts.
+    static let depthTickColor = ballColor
+
     /// Line width for ring index 0…ringCount-1 (0 = nearest / player plane).
     static func ringLineWidth(index: Int) -> CGFloat {
         switch index {
@@ -266,6 +294,9 @@ struct Config {
     /// Pad under the Dynamic Island / safe top for level + score (hearts sit higher).
     static let hudTopPad: CGFloat = 6
     static let hudBottomPad: CGFloat = 10
+    /// Pause glyph opacity. It sits in the bottom-right corner away from the
+    /// tunnel, so it can be legible without competing with the ball.
+    static let pauseButtonAlpha: CGFloat = 0.85
     /// Mac Catalyst titlebar eats the top of the content view; treat as min top inset.
     static let macTitlebarInset: CGFloat = 40
     /// Extra gap below hearts / court top when placing the LVL chrome label.

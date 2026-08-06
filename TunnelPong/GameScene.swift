@@ -101,6 +101,10 @@ final class GameScene: SKScene {
     private var rings: [SKShapeNode] = []
     private var depthPanels: [SKShapeNode] = []
     private var railSegments: [SKShapeNode] = []
+    /// Depth tracker: bright dashes riding the four corner rails at the ball's z.
+    /// Index order matches the (sx, sy) corner loop in `rebuildTunnelGeometry`.
+    private var depthTicks: [SKShapeNode] = []
+    private var depthTickHalos: [SKShapeNode] = []
     private var ringPulses: [SKAction] = []
     private var pauseDim: SKSpriteNode!
     private var scanlineNode: SKSpriteNode!
@@ -433,7 +437,10 @@ final class GameScene: SKScene {
         let safeScoreY = max(scoreY, minFloor + 28)
 
         hudScoreLabel.position = CGPoint(x: cx, y: safeScoreY)
-        pauseButton.position = CGPoint(x: size.width - sidePad - 8, y: safeScoreY)
+        // Pause lives in the bottom-right corner, clear of the tunnel mouth and
+        // under the thumb. Sits on the safe-area floor, not the court floor.
+        pauseButton.position = CGPoint(x: size.width - sidePad - 8,
+                                       y: botSafe + Config.hudBottomPad + 12)
         // Bonus popups sit above mid-court, snapped to the pixel grid.
         if bonusPopupLabel != nil {
             let popY = Config.snap((courtTopY + courtFloor) * 0.5 + halfH * 0.15)
@@ -537,6 +544,32 @@ final class GameScene: SKScene {
             railSegments.append(rail)
         }
 
+        // Depth tracker: one halo + one core per corner. Above the rails but
+        // below the ball, so the ball always wins where they overlap.
+        for _ in 0..<4 {
+            let halo = SKShapeNode()
+            halo.isAntialiased = false
+            halo.lineCap = .butt
+            halo.strokeColor = Config.depthTickColor
+            halo.lineWidth = Config.depthTickHaloWidth
+            halo.alpha = Config.depthTickHaloAlpha
+            halo.zPosition = 4
+            halo.isHidden = true
+            worldNode.addChild(halo)
+            depthTickHalos.append(halo)
+
+            let core = SKShapeNode()
+            core.isAntialiased = false
+            core.lineCap = .butt
+            core.strokeColor = Config.depthTickColor
+            core.lineWidth = Config.depthTickWidth
+            core.alpha = Config.depthTickAlpha
+            core.zPosition = 5
+            core.isHidden = true
+            worldNode.addChild(core)
+            depthTicks.append(core)
+        }
+
         rebuildTunnelGeometry()
     }
 
@@ -626,7 +659,7 @@ final class GameScene: SKScene {
         hudNode.addChild(hudHighScoreLabel)
 
         // Pixel font has "|" not the geometric pause bars.
-        pauseButton = NodeFactory.hudLabel("||", size: 17, color: Config.hudColor, alpha: 0.4)
+        pauseButton = NodeFactory.hudLabel("||", size: 17, color: Config.hudColor, alpha: Config.pauseButtonAlpha)
         hudNode.addChild(pauseButton)
 
         // Kept for layout compatibility; never shown (hearts carry the feedback).
@@ -1518,6 +1551,53 @@ final class GameScene: SKScene {
 
     // MARK: - Rendering (positions + one perspective scale; no allocations)
 
+    /// Ride a bright dash along each of the four corner rails at the ball's
+    /// current depth.
+    ///
+    /// This is the z-axis readout. The x/y walls deliberately stay dark until
+    /// individually struck — that is what makes a wall hit read as a hit — so
+    /// depth gets its own channel on the only geometry that runs along z.
+    ///
+    /// The dash spans a fixed range in *world* z, which perspective turns into
+    /// the timing cue: short and creeping while the ball is far, long and
+    /// racing as it arrives at your plane.
+    private func updateDepthTracker() {
+        guard !depthTicks.isEmpty else { return }
+        // Visible whenever the ball is: in flight, hanging at centre before a
+        // launch, or frozen on a plane after a point.
+        let show = !ballNode.isHidden
+        guard show else {
+            for n in depthTicks { n.isHidden = true }
+            for n in depthTickHalos { n.isHidden = true }
+            return
+        }
+
+        // Clamp the span so it never runs past the far wall or behind the
+        // camera-side rail stubs, where railAnchor would clamp both ends to the
+        // same point and collapse the dash to nothing.
+        let span = CourtMath.depthTickSpan(ballZ: bz,
+                                           halfZ: Config.depthTickHalfZ,
+                                           nearLimit: Config.railNearExtendZ,
+                                           zFar: Config.zFar)
+        let zNear = span.near
+        let zFarEnd = span.far
+
+        var i = 0
+        for sx: CGFloat in [-1, 1] {
+            for sy: CGFloat in [-1, 1] {
+                guard i < depthTicks.count else { break }
+                let path = CGMutablePath()
+                path.move(to: Config.snapPoint(railAnchor(sx: sx, sy: sy, z: zNear)))
+                path.addLine(to: Config.snapPoint(railAnchor(sx: sx, sy: sy, z: zFarEnd)))
+                depthTicks[i].path = path
+                depthTicks[i].isHidden = false
+                depthTickHalos[i].path = path
+                depthTickHalos[i].isHidden = false
+                i += 1
+            }
+        }
+    }
+
     private func renderWorld() {
         // Pixel-snap every actor: continuous physics, discrete picture.
         playerPaddleNode.position = Config.snapPoint(proj.project(x: px, y: py, z: 0))
@@ -1533,6 +1613,7 @@ final class GameScene: SKScene {
         let step = (2 * CGFloat.pi) / Config.ballSpinSteps
         ballSpinLayer?.zRotation = (ballSpin / step).rounded() * step
         ballNode.isHidden = (phase == .title || phase == .gameOver)
+        updateDepthTracker()
 
         if ballShadowNode != nil {
             let showShadow = !ballNode.isHidden && (ballLive || serveCountdown > 0 || pointFreezeCountdown > 0)

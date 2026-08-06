@@ -194,6 +194,39 @@ do {
           !CourtMath.firstTouchGoesToPlayer(playerWonLastPoint: false))
 }
 
+// 9. Depth tracker span — never collapses anywhere the ball can actually be.
+print("\n9) Depth tracker span (v1.6)")
+do {
+    var worstLen = CGFloat.greatestFiniteMagnitude
+    var badRange = false
+    // Sweep the whole court, including both planes exactly.
+    for i in 0...200 {
+        let bz = Config.zFar * CGFloat(i) / 200
+        let s = CourtMath.depthTickSpan(ballZ: bz,
+                                        halfZ: Config.depthTickHalfZ,
+                                        nearLimit: Config.railNearExtendZ,
+                                        zFar: Config.zFar)
+        worstLen = min(worstLen, s.far - s.near)
+        if s.near < Config.railNearExtendZ - 0.001 || s.far > Config.zFar + 0.001 { badRange = true }
+        if s.far <= s.near { badRange = true }
+    }
+    check("span never collapses across the whole court", worstLen > 0,
+          detail: "shortest=\(worstLen)")
+    check("span always stays on drawable rail", !badRange)
+
+    // At the far wall the dash must sit behind it, not poke through.
+    let atFar = CourtMath.depthTickSpan(ballZ: Config.zFar, halfZ: Config.depthTickHalfZ,
+                                        nearLimit: Config.railNearExtendZ, zFar: Config.zFar)
+    check("clamped at far wall", atFar.far <= Config.zFar + 0.001 && atFar.near < atFar.far,
+          detail: "near=\(atFar.near) far=\(atFar.far)")
+
+    // At the player plane it may extend toward the camera along the rail stub.
+    let atNear = CourtMath.depthTickSpan(ballZ: 0, halfZ: Config.depthTickHalfZ,
+                                         nearLimit: Config.railNearExtendZ, zFar: Config.zFar)
+    check("spans across the player plane", atNear.near < 0 && atNear.far > 0,
+          detail: "near=\(atNear.near) far=\(atNear.far)")
+}
+
 // D2 — AI lateral safety ceiling, computed from real Config endpoints.
 print("\n--- D2 aiLateralFrac ceiling (real Config) ---")
 print("LVL  rawAI  latFrac  ceiling  binds?")
