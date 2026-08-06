@@ -1,11 +1,12 @@
 # CyberPong — Status
 
-**Last updated:** 2026-08-04 (Claude) — v1.5 audited, test harness rewired to real source, installed on device.
+**Last updated:** 2026-08-04 (Claude) — v1.6 centre start (swipe-to-serve removed), 29 assertions green, installed on device.
 
-> **v1.5 mechanics ship.** Curveball-style continuous curve, degrading score bonuses,
+> **v1.6 mechanics ship.** Centre-start rallies, Curveball-style continuous curve, degrading score bonuses,
 > pure-logic CLI tests green. v2 multiplayer gate still CLOSED.
 
 ### Recent movement
+- **v1.6 "Centre Start"** (2026-08-04): every point now launches from dead centre of the tunnel toward whoever won the previous point. Swipe-to-serve removed entirely — your opening move is a return. Rally rules extracted to `CourtMath` so they're testable; 29 assertions green, sign-flip failure proven.
 - **v1.5 "Make It Actually Curve"** (2026-08-04): continuous curve from paddle velocity, renorm-after-curve, self-degrading bonuses + popups, AI wall clamp, face-grid / no-op knobs deleted. CLI: `./bin/test_v1_5.sh` (21 pass, linked against real source). Mac Catalyst + iOS device builds clean.
 
 ---
@@ -15,7 +16,7 @@
 | Field | Value |
 |-------|--------|
 | Name | **CyberPong** |
-| Version | **v1.5** (curve + scoring teeth; endless solo chase) |
+| Version | **v1.6** (centre start; curve + scoring teeth; endless solo chase) |
 | Repo | https://github.com/brooksmoore/TunnelPong (public) |
 | Bundle | `com.brooksmoore.tunnelpong` |
 | Platforms | iOS 17+ iPhone/iPad (portrait + landscape) · Mac Catalyst free resize |

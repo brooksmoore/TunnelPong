@@ -55,23 +55,23 @@ final class GameScene: SKScene {
     private var curveX: CGFloat = 0, curveY: CGFloat = 0
     private var ballLive = false           // false while waiting to serve / frozen
     private var serveCountdown: CGFloat = 0
-    /// You serve first each round; after a miss the opponent auto-serves.
-    private enum Server { case player, opponent }
-    private var nextServer: Server = .player
-    private var awaitingPlayerServe = false
+    /// Who the ball flies toward first when a point begins.
+    ///
+    /// Every point starts with the ball parked dead centre of the tunnel and
+    /// then launching — there is no serve-from-your-own-plane state. The ball
+    /// goes to whoever *won* the previous point: win and you get the free first
+    /// touch, lose and the opponent takes it and you receive whatever curve
+    /// they put on it. A new level is a gift, so it comes to you.
+    private enum FirstTouch { case player, opponent }
+    private var firstTouch: FirstTouch = .player
     /// Point just scored — ball held on the plane with a callout.
     private var pointFreezeCountdown: CGFloat = 0
     private var pendingPointWin = false   // true = you scored, false = you lost a life
     // Serve strike tracking (Mac: click/drag on ball; iOS: drag across ball).
     /// Serve gesture: accumulate travel so swipe threshold is FPS-independent.
-    private var serveDragStart: CGPoint?
-    private var serveDragPrev: CGPoint?
     /// Last-frame delta (instant spin intensity).
-    private var serveDragDelta: CGPoint = .zero
     /// Path length since touch-down (swipe threshold).
-    private var serveDragTravel: CGFloat = 0
     /// Net displacement from start (spin direction on serve).
-    private var serveDragNet: CGPoint = .zero
 
 
 
@@ -118,7 +118,6 @@ final class GameScene: SKScene {
     private weak var ballSpinLayer: SKNode?
     private var ballSpin: CGFloat = 0
     /// Cached so the serve affordance isn't re-applied every frame.
-    private var serveReadyShown: Bool?
     private var playerPaddleNode: SKShapeNode!
     private var oppPaddleNode: SKShapeNode!
 
@@ -129,7 +128,6 @@ final class GameScene: SKScene {
     private var hudPlayerLives: PixelLabel!
     private var hudOppLives: PixelLabel!
     private var pauseButton: PixelLabel!
-    private var serveHintLabel: PixelLabel!
     private var pointCalloutLabel: PixelLabel!
     private var bonusPopupLabel: PixelLabel!
     private var bonusPopupCountdown: CGFloat = 0
@@ -434,12 +432,7 @@ final class GameScene: SKScene {
         let minFloor = botSafe + Config.hudBottomPad + 36
         let safeScoreY = max(scoreY, minFloor + 28)
 
-        // Serve prompt: bottom of the *visible screen* (safe-area floor), not
-        // the court floor — so it never sits mid-tunnel over the action.
-        let serveY = botSafe + Config.hudBottomPad + 14
-
         hudScoreLabel.position = CGPoint(x: cx, y: safeScoreY)
-        serveHintLabel.position = CGPoint(x: cx, y: serveY)
         pauseButton.position = CGPoint(x: size.width - sidePad - 8, y: safeScoreY)
         // Bonus popups sit above mid-court, snapped to the pixel grid.
         if bonusPopupLabel != nil {
@@ -636,10 +629,6 @@ final class GameScene: SKScene {
         pauseButton = NodeFactory.hudLabel("||", size: 17, color: Config.hudColor, alpha: 0.4)
         hudNode.addChild(pauseButton)
 
-        serveHintLabel = NodeFactory.hudLabel("SWIPE TO SERVE", size: 15, color: Config.titleAccent, alpha: 0.9)
-        serveHintLabel.isHidden = true
-        hudNode.addChild(serveHintLabel)
-
         // Kept for layout compatibility; never shown (hearts carry the feedback).
         pointCalloutLabel = NodeFactory.titleLabel("", size: 32, color: .white)
         pointCalloutLabel.isHidden = true
@@ -773,17 +762,7 @@ final class GameScene: SKScene {
         Config.englishStrength
     }
 
-    private func serveDragSpin() -> CGFloat {
-        Config.serveDragSpin
-    }
-
     /// World-space: does the player paddle cover the (parked) serve ball?
-    private func paddleOverlapsServeBall() -> Bool {
-        let slop = Config.paddleHitSlop
-        return abs(px - bx) <= Config.playerPaddleHalfW + Config.ballRadius + slop
-            && abs(py - by) <= Config.playerPaddleHalfH + Config.ballRadius + slop
-    }
-
     // MARK: - Flow
 
     /// Reflect purchase state on the title screen. Called on show and whenever
@@ -853,13 +832,10 @@ final class GameScene: SKScene {
         playerVelX = 0; playerVelY = 0; oppVelX = 0; oppVelY = 0
         curveX = 0; curveY = 0
         touchTarget = nil
-        nextServer = .player     // every round (incl. level 1): you serve first
-        awaitingPlayerServe = false
+        firstTouch = .player     // fresh run: the first ball comes to you
         pointFreezeCountdown = 0
         pointCalloutLabel.isHidden = true
         hideBonusPopup()
-        serveHintLabel.isHidden = true
-        clearServeGesture()
 
         titleLayer.isHidden = true
         gameOverLayer.isHidden = true
@@ -879,56 +855,19 @@ final class GameScene: SKScene {
     private func scheduleServe() {
         rallyHits = 0
         ballLive = false
-        awaitingPlayerServe = false
         serveCountdown = 0
         // Every point: opponent starts centered (no crawl back from last rally).
         ox = 0; oy = 0
         ballNode.isHidden = false
-        serveHintLabel.isHidden = true
-        clearServeGesture()
 
-        switch nextServer {
-        case .opponent:
-            // Mid/far tunnel, then auto-launch toward you.
-            bx = 0; by = 0
-            bz = Config.zFar * Config.serveZFraction
-            serveCountdown = Config.serveDelay
-        case .player:
-            // Fixed center of court — does NOT follow the paddle until struck.
-            bx = 0; by = 0
-            bz = Config.playerServeZ
-            awaitingPlayerServe = true
-            // Short copy only — the old sentence ran off both edges of the
-            // window. The "cover the ball first" half is taught by the
-            // affordance in update(), not by more text.
-            #if targetEnvironment(macCatalyst)
-            serveHintLabel.display("CLICK OR DRAG TO SERVE")
-            #else
-            serveHintLabel.display("SWIPE TO SERVE")
-            #endif
-            serveReadyShown = nil
-            serveHintLabel.isHidden = false
-        }
+        // Every point begins the same way: ball parked dead centre of the
+        // tunnel, then launched toward whoever gets the first touch. Direction
+        // is decided in launchBall(); the hang time here is what lets you read
+        // which way it's about to go.
+        bx = 0; by = 0
+        bz = CourtMath.rallyStartZ(zFar: Config.zFar, fraction: Config.rallyStartZFraction)
+        serveCountdown = Config.serveDelay
         renderWorld()
-    }
-
-    private func clearServeGesture() {
-        serveDragStart = nil
-        serveDragPrev = nil
-        serveDragDelta = .zero
-        serveDragTravel = 0
-        serveDragNet = .zero
-    }
-
-    /// Spin vector for the current press gesture (net displacement preferred).
-    private func serveSpinVector() -> CGPoint {
-        if hypot(serveDragNet.x, serveDragNet.y) > 2 { return serveDragNet }
-        if hypot(serveDragDelta.x, serveDragDelta.y) > 2 { return serveDragDelta }
-        return .zero
-    }
-
-    private func serveTravelMin() -> CGFloat {
-        Config.serveSwipeMin
     }
 
     private func resetBonusesOnLifeLoss() {
@@ -964,29 +903,9 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Drag-serve: paddle on ball + enough travel while button/finger is down.
-    private func tryDragServe() {
-        guard awaitingPlayerServe, !ballLive, pointFreezeCountdown <= 0 else { return }
-        guard paddleOverlapsServeBall() else { return }
-        guard serveDragTravel > serveTravelMin() else { return }
-        launchPlayerServe(dragScreen: serveSpinVector())
-    }
-
-    /// Click/tap-serve: press ended while paddle still covers the ball.
-    /// Short click (little travel) counts; pure hover never reaches here.
-    private func tryClickServe() {
-        guard awaitingPlayerServe, !ballLive, pointFreezeCountdown <= 0 else { return }
-        guard serveDragStart != nil else { return }  // must have pressed
-        guard paddleOverlapsServeBall() else { return }
-        launchPlayerServe(dragScreen: serveSpinVector())
-    }
-
-    /// Opponent auto-serve (toward you).
+    /// Launch the point from tunnel centre toward whoever gets the first touch.
     private func launchBall() {
         guard !ballLive, pointFreezeCountdown <= 0 else { return }
-        awaitingPlayerServe = false
-        serveHintLabel.isHidden = true
-        clearServeGesture()
         ballLive = true
         curveX = 0; curveY = 0
         let speed = levelBallSpeed()
@@ -995,57 +914,8 @@ final class GameScene: SKScene {
         vx = speed * 0.28 * a
         vy = speed * 0.20 * b
         let vzMag = sqrt(max(speed * speed - vx * vx - vy * vy, 1))
-        vz = -vzMag
-    }
-
-    /// Your serve: ball stays centered until struck by the *paddle* (any part).
-    /// English from contact offset (corners veer off that corner); drag adds spin.
-    private func launchPlayerServe(dragScreen: CGPoint) {
-        guard awaitingPlayerServe, !ballLive, pointFreezeCountdown <= 0 else { return }
-        guard paddleOverlapsServeBall() else { return }
-
-        awaitingPlayerServe = false
-        serveHintLabel.isHidden = true
-        clearServeGesture()
-
-        bx = 0; by = 0; bz = Config.playerServeZ
-        let speed = levelBallSpeed()
-
-        // Contact normal: ball at center relative to paddle — whole face works,
-        // not just the visual midpoint. Corners → both axes high → extra veer.
-        let nX = max(-1, min(1, (bx - px) / max(Config.playerPaddleHalfW, 1)))
-        let nY = max(-1, min(1, (by - py) / max(Config.playerPaddleHalfH, 1)))
-        let corner = abs(nX) * abs(nY)
-        let eng = englishStrength() * (1 + Config.serveCornerBoost * corner)
-
-        // Serve drag → curve (brush English: opposite the swipe, like Curveball).
-        let dragMag = hypot(dragScreen.x, dragScreen.y)
-        if dragMag > 3 {
-            let t = min(dragMag, 90) / 90
-            let spin = serveDragSpin()
-            // Negate: downward swipe lifts; leftward swipe curves right.
-            curveX = -(dragScreen.x / dragMag) * spin * t
-            curveY = -(dragScreen.y / dragMag) * spin * t
-            CourtMath.clampCurve(curveX: &curveX, curveY: &curveY, maxMag: Config.curveMax)
-        } else {
-            // Still impart curve from live paddle velocity if any.
-            let c = CourtMath.curveFromPaddleVelocity(
-                paddleVelX: playerVelX, paddleVelY: playerVelY,
-                scale: Config.curveFromPaddleVel, maxMag: Config.curveMax,
-                invert: true)
-            curveX = c.0; curveY = c.1
-        }
-
-        vx = nX * eng * speed
-        vy = nY * eng * speed
-        vz = sqrt(max(speed * speed * 0.85, 1))
-        ballLive = true
-        applySpeed(speed)
-        Haptics.shared.paddleHit()
-        Audio.shared.paddleHit(player: true)
+        vz = CourtMath.rallyLaunchVz(magnitude: vzMag, towardPlayer: firstTouch == .player)
         Audio.shared.serve()
-        flashPaddle(playerPaddleNode)
-        pulseRing(atZ: bz)
     }
 
     /// Brief contact cue: outer shell pops + paddle face brightens + tiny scale.
@@ -1123,14 +993,14 @@ final class GameScene: SKScene {
 
     private func resolvePointFreeze() {
         if pendingPointWin {
-            nextServer = .player
+            firstTouch = CourtMath.firstTouchGoesToPlayer(playerWonLastPoint: true) ? .player : .opponent
             if opponentLives <= 0 {
                 levelUp()
             } else {
                 scheduleServe()
             }
         } else {
-            nextServer = .opponent
+            firstTouch = CourtMath.firstTouchGoesToPlayer(playerWonLastPoint: false) ? .player : .opponent
             if playerLives < 0 {
                 endRun()
             } else {
@@ -1172,7 +1042,7 @@ final class GameScene: SKScene {
     private func endTransition() {
         transitionLabel.isHidden = true
         phase = .playing
-        nextServer = .player     // new level/round: you serve first
+        firstTouch = .player     // new level is a gift: ball comes to you
         ballNode.isHidden = false
         scheduleServe()
     }
@@ -1206,7 +1076,6 @@ final class GameScene: SKScene {
         ballNode.isHidden = true
         playerPaddleNode.isHidden = true
         oppPaddleNode.isHidden = true
-        serveHintLabel.isHidden = true
         pointCalloutLabel.isHidden = true
         phase = .gameOver
         lastPhaseChange = CACurrentMediaTime()
@@ -1283,18 +1152,6 @@ final class GameScene: SKScene {
             } else {
                 stepBall(dt)
                 stepAI(dt)
-            }
-            // Serve ball stays fixed at court center until struck (not glued to paddle).
-            if awaitingPlayerServe {
-                bx = 0; by = 0; bz = Config.playerServeZ
-                // Light the prompt only once the paddle actually covers the
-                // ball, so the requirement is shown rather than spelled out.
-                let ready = paddleOverlapsServeBall()
-                if serveReadyShown != ready {
-                    serveReadyShown = ready
-                    serveHintLabel.tint = ready ? Config.playerColor : Config.hudColor
-                    serveHintLabel.alpha = ready ? 1.0 : 0.45
-                }
             }
             renderWorld()
         case .levelTransition:
@@ -1424,7 +1281,7 @@ final class GameScene: SKScene {
     private func stepBall(_ dt: CGFloat) {
         if !ballLive {
             // Opponent auto-serve only (player serve waits for click/tap).
-            if !awaitingPlayerServe && serveCountdown > 0 {
+            if serveCountdown > 0 {
                 serveCountdown -= dt
                 if serveCountdown <= 0 { launchBall() }
             }
@@ -1678,7 +1535,7 @@ final class GameScene: SKScene {
         ballNode.isHidden = (phase == .title || phase == .gameOver)
 
         if ballShadowNode != nil {
-            let showShadow = !ballNode.isHidden && (ballLive || awaitingPlayerServe || pointFreezeCountdown > 0)
+            let showShadow = !ballNode.isHidden && (ballLive || serveCountdown > 0 || pointFreezeCountdown > 0)
             ballShadowNode.isHidden = !showShadow
             if showShadow {
                 let heightFrac = max(0, min(1, (by + halfH) / max(2 * halfH, 1)))
@@ -1766,20 +1623,6 @@ final class GameScene: SKScene {
                 pauseGame()
                 return
             }
-            if awaitingPlayerServe {
-                // Press starts a serve gesture (click or drag). Hover alone does not.
-                serveDragStart = loc
-                serveDragPrev = loc
-                serveDragDelta = .zero
-                serveDragTravel = 0
-                serveDragNet = .zero
-                #if targetEnvironment(macCatalyst)
-                // Aim still follows hover; press only arms serve.
-                #else
-                beginRelativeDrag(at: loc)
-                #endif
-                return
-            }
             #if targetEnvironment(macCatalyst)
             // Hover owns aim on Mac; clicks are UI / serve only.
             #else
@@ -1797,42 +1640,12 @@ final class GameScene: SKScene {
               let touch = touches.first else { return }
         let loc = touch.location(in: self)
 
-        if phase == .playing, awaitingPlayerServe {
-            if let prev = serveDragPrev {
-                let step = CGPoint(x: loc.x - prev.x, y: loc.y - prev.y)
-                serveDragDelta = step
-                serveDragTravel += hypot(step.x, step.y)
-            }
-            if let start = serveDragStart {
-                serveDragNet = CGPoint(x: loc.x - start.x, y: loc.y - start.y)
-            }
-            serveDragPrev = loc
-            #if targetEnvironment(macCatalyst)
-            setTouchTarget(loc)
-            #else
-            updateRelativeDrag(to: loc)
-            #endif
-            // Drag-across: fire mid-gesture once travel is deliberate.
-            tryDragServe()
-            return
-        }
-
         #if !targetEnvironment(macCatalyst)
         updateRelativeDrag(to: loc)
         #endif
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if phase == .playing, awaitingPlayerServe {
-            // Click/tap on the ball, or release after a drag-swipe.
-            // (Hover with no press never gets here.)
-            if serveDragTravel > serveTravelMin() {
-                tryDragServe()
-            } else {
-                tryClickServe()
-            }
-        }
-        clearServeGesture()
         #if targetEnvironment(macCatalyst)
         // Keep last aim; hover continues tracking without a click.
         #else
@@ -1842,7 +1655,6 @@ final class GameScene: SKScene {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        clearServeGesture()
         #if targetEnvironment(macCatalyst)
         #else
         dragAnchorScreen = nil

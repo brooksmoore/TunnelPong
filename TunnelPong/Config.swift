@@ -108,7 +108,7 @@ struct Config {
     // MARK: - Ball (constants that do not ramp)
     /// World-space radius (also base on-screen size at z = 0).
     static let ballRadius: CGFloat = 24
-    /// Extra english when the paddle *corner* is on the ball at serve (0–1 scale).
+    /// Extra english when the paddle *corner* is on the ball at contact (0–1 scale).
     static let serveCornerBoost: CGFloat = 0.90
     /// Minimum share of total speed kept along z, so the ball can't stall
     /// bouncing sideways after heavy english. Slightly lower = more lateral room
@@ -116,11 +116,13 @@ struct Config {
     static let minVzFraction: CGFloat = 0.36
     /// Absolute ceiling (safety). L10 endpoints stay under this.
     static let ballMaxSpeed: CGFloat = 1200
-    /// Where opponent auto-serves spawn, as a fraction of zFar.
-    static let serveZFraction: CGFloat = 0.55
-    /// Player serve parks slightly in front of the near plane.
-    static let playerServeZ: CGFloat = 40
-    /// Pause before opponent auto-serve launches, seconds.
+    /// Every point starts here: dead centre of the tunnel, both axes zero.
+    /// 0.5 = exactly halfway between the player plane (z = 0) and the
+    /// opponent plane (z = zFar). There is no serve-from-your-own-plane state;
+    /// the ball launches from the middle toward whoever gets the first touch.
+    static let rallyStartZFraction: CGFloat = 0.5
+    /// Beat the ball hangs at centre before launching, seconds. Long enough to
+    /// read which way it's about to go, short enough not to feel like a wait.
     static let serveDelay: CGFloat = 0.75
     /// Hold the ball on the plane after a point, then resolve lives/score.
     static let pointFreezeDuration: CGFloat = 0.65
@@ -155,10 +157,6 @@ struct Config {
     static let playerPaddleHalfW: CGFloat = 72
     static let playerPaddleHalfH: CGFloat = 52
     static let paddleHitSlop: CGFloat = 14
-    /// Minimum cumulative drag travel (while button/finger down) to count as a
-    /// serve *swipe*. Pure hover never serves — need a click or a real drag.
-    /// Mac and iOS share one threshold.
-    static let serveSwipeMin: CGFloat = 18
     /// iOS relative-drag amplification. The paddle moves this many times
     /// further than your thumb, so the whole court is reachable one-handed
     /// without stretching. 1.0 would be literal 1:1 dragging.
@@ -209,8 +207,6 @@ struct Config {
     // Contact-offset english — demoted in v1.5 so paddle-velocity curve dominates.
     // Absolute veer still grows with ball speed via eng * speed.
     static let englishStrength: CGFloat = 0.45
-    // Serve drag → curve magnitude (not direct velocity). Full power from L1.
-    static let serveDragSpin: CGFloat = 880
 
     // AI: pure ball tracking. Difficulty = linear tracking speed only.
     //   L1  — slow enough that casual angles score freely

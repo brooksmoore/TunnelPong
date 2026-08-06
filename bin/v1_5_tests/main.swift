@@ -168,6 +168,32 @@ do {
     check("levelClearBonus reset", b.levelClearBonus == Config.levelClearBonusStart)
 }
 
+// 8. Rally start: centre spawn, direction follows the previous point's winner.
+print("\n8) Rally start (v1.6)")
+do {
+    let z = CourtMath.rallyStartZ(zFar: Config.zFar, fraction: Config.rallyStartZFraction)
+    check("starts at tunnel centre", nearlyEqual(z, Config.zFar / 2, tol: 0.001),
+          detail: "z=\(z) zFar=\(Config.zFar)")
+    check("centre is strictly between both planes", z > 0 && z < Config.zFar)
+
+    // Sign convention: player plane is z = 0, so toward the player is negative.
+    check("toward player is negative vz",
+          CourtMath.rallyLaunchVz(magnitude: 500, towardPlayer: true) < 0)
+    check("toward opponent is positive vz",
+          CourtMath.rallyLaunchVz(magnitude: 500, towardPlayer: false) > 0)
+    check("magnitude preserved either way",
+          abs(CourtMath.rallyLaunchVz(magnitude: 500, towardPlayer: true)) == 500 &&
+          abs(CourtMath.rallyLaunchVz(magnitude: 500, towardPlayer: false)) == 500)
+    // A negative magnitude must not silently flip the direction.
+    check("negative magnitude still goes toward player",
+          CourtMath.rallyLaunchVz(magnitude: -500, towardPlayer: true) < 0)
+
+    check("winner of last point gets first touch — player won",
+          CourtMath.firstTouchGoesToPlayer(playerWonLastPoint: true))
+    check("winner of last point gets first touch — player lost",
+          !CourtMath.firstTouchGoesToPlayer(playerWonLastPoint: false))
+}
+
 // D2 — AI lateral safety ceiling, computed from real Config endpoints.
 print("\n--- D2 aiLateralFrac ceiling (real Config) ---")
 print("LVL  rawAI  latFrac  ceiling  binds?")

@@ -5,6 +5,65 @@ Audience: Brooks + any AI (Claude, Grok, Composer) picking up the project.
 
 ---
 
+## 2026-08-04 — v1.6 "Centre Start" (Claude)
+
+**Source:** Brooks, after extended device play. Curve confirmed good on phone; no
+retune needed.
+
+### The change
+
+Every point now begins with the ball parked **dead centre of the tunnel**
+(`rallyStartZFraction = 0.5`), hanging for `serveDelay`, then launching toward
+whoever gets the first touch. Swipe-to-serve is gone entirely — your opening
+action is a *return*, not a serve.
+
+**Direction rule:** the ball goes first toward whoever **won** the previous
+point. Win it and you get the free opening touch; lose it and the opponent takes
+the ball first and you receive whatever curve they put on it. A new level (and a
+fresh run) counts as a win for the player, so it comes to you.
+
+Note this is a genuine behaviour change on a loss: the old code had the opponent
+serve *at* you after you conceded. Now they get the first touch instead.
+
+### Record correction
+
+Brooks recalled the original Curveball as starting each point with the ball
+travelling to the player from the far side. Re-checked the decompiled source:
+it does not. After a point the original goes to a "Serve" state with the ball
+stationary at the player's own plane (`myPos.z = 0`, `mySpeed.z = 0`) and
+`onClipEvent(mouseDown)` launches it — essentially what CyberPong already had.
+The new behaviour is therefore **our design, not a port**. It is better than
+both: it removes a dead stop from the start of every point and makes the opening
+action a return, which is where the curve mechanic actually lives.
+
+### Deleted (dead once serving is gone)
+
+`awaitingPlayerServe`, the five `serveDrag*` gesture vars, `serveReadyShown`,
+`serveHintLabel` (+ its layout and creation), `tryDragServe`, `tryClickServe`,
+`launchPlayerServe`, `serveSpinVector`, `serveTravelMin`, `paddleOverlapsServeBall`,
+`clearServeGesture`, and the serve branches in all three touch handlers.
+Config: `serveSwipeMin`, `serveDragSpin`, `playerServeZ`, `serveZFraction`.
+`serveCornerBoost` stays — `applyEnglish` still uses it for corner contact.
+
+### Tests
+
+Extracted the rally rules to `CourtMath.rallyStartZ`, `rallyLaunchVz`, and
+`firstTouchGoesToPlayer` so they are reachable from the CLI harness instead of
+being buried in the scene, and wired `GameScene` to call them. **29 assertions**
+(up from 21), including that the centre is strictly between both planes, that a
+negative magnitude cannot silently flip direction, and that the winner of the
+last point gets the first touch.
+
+**Failure proven:** inverting the sign in the real `rallyLaunchVz` turned three
+assertions red; reverting turned them green. The sign convention (player plane
+is z = 0, so toward the player is negative vz) is exactly the thing most likely
+to get flipped by a future edit, which is why it is a named function rather than
+a ternary in the scene.
+
+Dead-knob sweep clean. Built signed and installed on BCM 16 Pro Max.
+
+---
+
 ## 2026-08-04 — v1.5 "Make It Actually Curve" (Grok)
 
 **Source:** `GROK_HANDOFF_v1_5.md` (Claude) after Curveball SWF decompile comparison.

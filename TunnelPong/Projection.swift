@@ -154,6 +154,34 @@ enum CourtMath {
     static func followAlpha(lerpPerFrame: CGFloat, dt: CGFloat) -> CGFloat {
         1 - pow(1 - max(0, min(1, lerpPerFrame)), dt * 60)
     }
+
+    // MARK: - Rally start
+
+    /// Where a point begins: dead centre of the tunnel on x and y, and
+    /// `fraction` of the way down z. There is no serve-from-your-own-plane.
+    static func rallyStartZ(zFar: CGFloat, fraction: CGFloat) -> CGFloat {
+        zFar * fraction
+    }
+
+    /// Launch direction out of the centre.
+    ///
+    /// The player plane is z = 0 and the opponent plane is z = zFar, so heading
+    /// toward the player is **negative** vz. Getting this sign backwards sends
+    /// every point the wrong way, which is why it is a function and not a
+    /// ternary buried in the scene.
+    static func rallyLaunchVz(magnitude: CGFloat, towardPlayer: Bool) -> CGFloat {
+        towardPlayer ? -abs(magnitude) : abs(magnitude)
+    }
+
+    /// Who receives the first touch of the next point.
+    ///
+    /// The ball always goes first toward whoever **won** the previous point:
+    /// win it and you get the free opening touch, lose it and the opponent
+    /// takes the ball first and you receive whatever curve they put on it.
+    /// A new level counts as a win for the player (see `GameScene.endTransition`).
+    static func firstTouchGoesToPlayer(playerWonLastPoint: Bool) -> Bool {
+        playerWonLastPoint
+    }
 }
 
 // MARK: - Self-degrading score bonuses (pure; no SpriteKit)
