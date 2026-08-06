@@ -106,8 +106,10 @@ struct Config {
     // Kept small and simple on purpose — a long dash read as clunky. The dot
     // scales with perspective, so its own acceleration is the timing cue.
 
-    /// Dot radius in points, before depth scaling.
-    static let depthDotRadius: CGFloat = 5
+    /// Dot radius in points, before depth scaling. This is the single size
+    /// knob — the near/far multipliers below set the *differentiation*, so
+    /// changing this scales both ends together and preserves that ratio.
+    static let depthDotRadius: CGFloat = 3.5
     /// Size multiplier at the player's plane and at the far wall. Read linearly
     /// in depth rather than straight off the perspective divide, so the near/far
     /// difference is a deliberate, tunable amount instead of whatever the

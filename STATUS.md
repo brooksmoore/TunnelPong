@@ -1,6 +1,6 @@
 # CyberPong — Status
 
-**Last updated:** 2026-08-04 (Claude) — v2.0 ball travels to the glass, 39 assertions green, installed on device.
+**Last updated:** 2026-08-04 (Claude) — v2.0.1 depth dot shrunk, 39 assertions green, installed on device.
 
 > **v1.6 mechanics ship.** Centre-start rallies, Curveball-style continuous curve, degrading score bonuses,
 > pure-logic CLI tests green. v2 multiplayer gate still CLOSED.

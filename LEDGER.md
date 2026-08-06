@@ -5,6 +5,19 @@ Audience: Brooks + any AI (Claude, Grok, Composer) picking up the project.
 
 ---
 
+## 2026-08-04 — v2.0.1 depth dot size (Claude)
+
+`depthDotRadius` 5 → 3.5 on Brooks's note that the z-axis indicators read too
+large. Changed the radius rather than the near/far multipliers, so the
+differentiation he asked for in v2.0 is preserved exactly: on-screen width goes
+14.5pt → 10.2pt at the player plane and 5.0pt → 3.5pt at the far wall, same
+ratio. Radius is the single size knob by design; the multipliers set contrast.
+
+No test added — this is pure aesthetics with no failure mode. 39 assertions
+still green. Appearance unverified locally (no Screen Recording permission).
+
+---
+
 ## 2026-08-04 — v2.0 "To The Glass" (Claude)
 
 **Source:** Brooks, with a device screenshot of v1.9. Four notes.
