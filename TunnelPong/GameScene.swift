@@ -100,6 +100,9 @@ final class GameScene: SKScene {
     private let worldNode = SKNode()
     private var rings: [SKShapeNode] = []
     private var depthPanels: [SKShapeNode] = []
+    /// Depth of the player's paddle plane — negative, in front of the first
+    /// wall. Recomputed by `applyCourtMetrics` (see `CourtMath.planeZFilling`).
+    private var playerPlaneZ: CGFloat = 0
     private var railSegments: [SKShapeNode] = []
     /// Depth tracker: small dots riding the four corner rails at the ball's z.
     /// Index order matches the (sx, sy) corner loop in `rebuildTunnelGeometry`.
@@ -243,6 +246,16 @@ final class GameScene: SKScene {
 
         halfW = usableW / 2 * Config.courtWidthFactor
         halfH = max(1, (courtTopY - courtBottomY) / 2 * Config.courtHeightFactor)
+
+        // Player plane: the depth at which the court projects to the screen's
+        // full width, so the ball arrives at the glass and the paddle can reach
+        // every visible point. Derived rather than hardcoded so it holds across
+        // devices, orientations and free Mac resize.
+        playerPlaneZ = CourtMath.planeZFilling(
+            targetHalfWidth: size.width / 2 * Config.playerPlaneScreenFill,
+            courtHalfWidth: halfW,
+            focal: Config.focal,
+            minZ: max(Config.playerPlaneMinZ, Config.railNearExtendZ + 1))
     }
 
     /// Call after safeInsets or size change (rotation, Mac resize, notch, titlebar).
@@ -429,10 +442,11 @@ final class GameScene: SKScene {
         // LVL is painted on the ceiling, the score on the floor. Each anchors to
         // its own wall, so both sit the same distance from their wall by
         // construction rather than by tuning.
+        let hudSpan = Config.hudSurfaceSpan
         hudLevelLabel.surface = PixelLabel.SurfaceProjection(
             focal: Config.focal,
-            zNear: Config.hudSurfaceZNear,
-            zFar: Config.hudSurfaceZFar,
+            zNear: hudSpan.near,
+            zFar: hudSpan.far,
             surfaceY: halfH,
             widthScale: Config.hudSurfaceWidthScale,
             nearAtTop: true)
@@ -442,8 +456,8 @@ final class GameScene: SKScene {
 
         hudScoreLabel.surface = PixelLabel.SurfaceProjection(
             focal: Config.focal,
-            zNear: Config.hudSurfaceZNear,
-            zFar: Config.hudSurfaceZFar,
+            zNear: hudSpan.near,
+            zFar: hudSpan.far,
             surfaceY: -halfH,
             widthScale: Config.hudSurfaceWidthScale,
             nearAtTop: false)
@@ -1384,8 +1398,9 @@ final class GameScene: SKScene {
         let oHitW = Config.oppPaddleHalfW + Config.ballRadius + pSlop
         let oHitH = Config.oppPaddleHalfH + Config.ballRadius + pSlop
 
-        if prevZ > 0 && bz <= 0 && vz < 0 {
-            let t = prevZ / (prevZ - bz)
+        let pz = playerPlaneZ
+        if prevZ > pz && bz <= pz && vz < 0 {
+            let t = (prevZ - pz) / (prevZ - bz)
             let xc = prevX + (bx - prevX) * t
             let yc = prevY + (by - prevY) * t
             if abs(xc - px) <= pHitW, abs(yc - py) <= pHitH {
@@ -1393,13 +1408,13 @@ final class GameScene: SKScene {
                           paddleHalfW: Config.playerPaddleHalfW,
                           paddleHalfH: Config.playerPaddleHalfH,
                           paddleVelX: playerVelX, paddleVelY: playerVelY,
-                          newZ: 0.1, outbound: true, awardScore: true)
+                          newZ: pz + 0.1, outbound: true, awardScore: true)
                 rallyHits += 1
                 Haptics.shared.paddleHit()
                 Audio.shared.paddleHit(player: true)
             } else {
                 // Miss: stop on the plane — no fly-through past the camera.
-                beginPointFreeze(playerScored: false, atX: xc, y: yc, z: 0)
+                beginPointFreeze(playerScored: false, atX: xc, y: yc, z: pz)
                 return
             }
         }
@@ -1424,7 +1439,7 @@ final class GameScene: SKScene {
 
         // Safety net if a frame skips the plane entirely.
         if bz < -40 {
-            beginPointFreeze(playerScored: false, atX: bx, y: by, z: 0)
+            beginPointFreeze(playerScored: false, atX: bx, y: by, z: playerPlaneZ)
         } else if bz > Config.zFar + 40 {
             beginPointFreeze(playerScored: true, atX: bx, y: by, z: Config.zFar)
         }
@@ -1569,9 +1584,11 @@ final class GameScene: SKScene {
         }
 
         let z = min(max(bz, Config.railNearExtendZ), Config.zFar)
-        // Floor the scale so the dot stays visible against the far wall, where
-        // raw perspective would shrink it below a pixel.
-        let sc = max(proj.scale(z: z), Config.depthDotMinScale)
+        // Size reads linearly in depth rather than off the perspective divide,
+        // so near/far differ by a deliberate amount. Matches the rails, which
+        // are thicker toward the viewer and thinner heading away.
+        let t = min(max(z / Config.zFar, 0), 1)
+        let sc = Config.lerp(Config.depthDotNearScale, Config.depthDotFarScale, t)
 
         var i = 0
         for sx: CGFloat in [-1, 1] {
@@ -1587,7 +1604,7 @@ final class GameScene: SKScene {
 
     private func renderWorld() {
         // Pixel-snap every actor: continuous physics, discrete picture.
-        playerPaddleNode.position = Config.snapPoint(proj.project(x: px, y: py, z: 0))
+        playerPaddleNode.position = Config.snapPoint(proj.project(x: px, y: py, z: playerPlaneZ))
         oppPaddleNode.position = Config.snapPoint(proj.project(x: ox, y: oy, z: Config.zFar))
         // Quantize far paddle scale to keep slab edges on-grid.
         let oppS = proj.scale(z: Config.zFar)

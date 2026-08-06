@@ -5,6 +5,63 @@ Audience: Brooks + any AI (Claude, Grok, Composer) picking up the project.
 
 ---
 
+## 2026-08-04 — v2.0 "To The Glass" (Claude)
+
+**Source:** Brooks, with a device screenshot of v1.9. Four notes.
+
+### 1. Ball now travels to the screen
+The player's paddle plane moved from `z = 0` (the first wall) to a **negative
+depth in front of it**, so the z axis genuinely continues through the viewer.
+
+Not hardcoded. `CourtMath.planeZFilling` derives the depth at which the court
+projects to the full screen width, so the plane lands at the glass on any device,
+orientation, or Mac window size, and the paddle can reach every visible point.
+`playerPlaneScreenFill` (1.0) tunes it; `playerPlaneMinZ` (-140) is a hard floor.
+
+**Why the floor matters:** the perspective divide blows up as z approaches
+`-focal` (-280) and turns the tunnel inside out. The sabotage run proved this is
+live — with the clamp removed, an extreme aspect ratio produced z = -279.4.
+
+Physics is unchanged: walls and the ball stay in world units, so only the plane
+of judgement and its projection moved. Near-plane crossing, hit response, miss
+freeze, and paddle rendering all key off the new plane.
+
+### 2. Motion blur raised
+`trailLength` 5 → 8, head alpha 0.55 → 0.70, tail 0.12 → 0.16, tail scale
+0.55 → 0.62.
+
+### 3. Depth dot differentiates with distance
+Size now lerps `depthDotNearScale` 1.45 → `depthDotFarScale` 0.50 **linearly in
+depth**, rather than reading straight off the perspective divide. Linear keeps
+the near/far difference a deliberate, tunable amount. Echoes the rails, which are
+already thicker near the viewer and thinner heading away — Brooks's own reason.
+
+### 4. Surface type centred in its wall segment
+Brooks saw a gap at one wall and none at the other. Cause: the type was inset in
+**z**, but perspective is non-linear, so equal depth padding produces unequal
+screen gaps. `CourtMath.surfaceTypeSpan` now insets in *scale* space, which is
+what the eye actually reads as centred. `hudSurfaceSegmentInset` = 0.14 of the
+segment's on-screen height, both ends.
+
+Also `hudLevelSize` 30 → 36: LVL read skinny next to the score, and in a bitmap
+font the pixel size *is* the stroke weight, so matching heights matches weight.
+
+### Tests
+**39 assertions** (up from 33). New: the type stays inside its segment, the two
+screen gaps are equal to within 0.002 and both non-zero; the plane lands where
+the court fills the target width, is never pushed behind the first wall, is
+clamped at the safety floor, and the rails still extend past it.
+
+**Failure proven twice:** zeroing the inset turns the centring red; removing the
+plane clamp turns two red including the inside-out case above.
+
+### Not verified
+Appearance unverified locally — still no Screen Recording permission. Brooks to
+judge, especially whether the ball arriving at the glass feels right, since at
+that depth the side walls sit near or beyond the frame edges by design.
+
+---
+
 ## 2026-08-04 — v1.9 "One Segment" (Claude)
 
 **Source:** Brooks, with a device screenshot of v1.8. Depth dot approved. Surface

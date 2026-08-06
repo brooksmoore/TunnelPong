@@ -194,23 +194,57 @@ do {
           !CourtMath.firstTouchGoesToPlayer(playerWonLastPoint: false))
 }
 
-// 9. Surface HUD type stays inside one wall segment.
-print("\n9) Surface HUD type depth (v1.9)")
+// 9. Surface HUD type: inside one wall segment AND centred on screen.
+print("\n9) Surface HUD type (v2.0)")
 do {
-    let zEnd = Config.hudSurfaceZFar
-    let ring1 = Config.zFar * CourtMath.ringT(index: 1, ringCount: Config.ringCount)
-    check("type ends on the second ring, not past it", zEnd <= ring1 + 0.001,
-          detail: "zFar=\(zEnd) ring1=\(ring1)")
-    check("type starts before it ends", Config.hudSurfaceZNear < zEnd,
-          detail: "near=\(Config.hudSurfaceZNear) far=\(zEnd)")
-    check("type starts at or after the near wall", Config.hudSurfaceZNear >= 0)
+    let ringA = Config.zFar * CourtMath.ringT(index: Config.hudSurfaceEndRing - 1, ringCount: Config.ringCount)
+    let ringB = Config.zFar * CourtMath.ringT(index: Config.hudSurfaceEndRing, ringCount: Config.ringCount)
+    let span = Config.hudSurfaceSpan
 
-    // The whole point is that it fills roughly one wall segment — if the span
-    // ever grows past ~1.2 segments it will read as sprawling again.
-    let segment = ring1
-    check("span is about one wall segment",
-          (zEnd - Config.hudSurfaceZNear) <= segment * 1.2,
-          detail: "span=\(zEnd - Config.hudSurfaceZNear) segment=\(segment)")
+    check("stays inside its wall segment",
+          span.near >= ringA - 0.001 && span.far <= ringB + 0.001,
+          detail: "span=\(span) segment=(\(ringA), \(ringB))")
+    check("near edge is nearer than far edge", span.near < span.far)
+
+    // The real ask: equal gaps top and bottom. Surface type sits at constant
+    // world height, so screen offset is proportional to perspective scale.
+    func scale(_ z: CGFloat) -> CGFloat { Config.focal / (Config.focal + z) }
+    let gapNear = scale(ringA) - scale(span.near)
+    let gapFar = scale(span.far) - scale(ringB)
+    check("screen gap equal at both walls",
+          nearlyEqual(gapNear, gapFar, tol: 0.002),
+          detail: "near=\(gapNear) far=\(gapFar)")
+    check("there is an actual gap", gapNear > 0.001 && gapFar > 0.001,
+          detail: "near=\(gapNear) far=\(gapFar)")
+}
+
+// 10. Player plane sits at the glass, in front of the first wall.
+print("\n10) Player plane (v2.0)")
+do {
+    // Court narrower than the screen -> plane must come toward the viewer.
+    let z = CourtMath.planeZFilling(targetHalfWidth: 200, courtHalfWidth: 180,
+                                    focal: Config.focal, minZ: Config.playerPlaneMinZ)
+    check("plane is in front of the first wall", z < 0, detail: "z=\(z)")
+    // And it must land exactly where the court fills the target.
+    let s = Config.focal / (Config.focal + z)
+    check("court projects to the target width", nearlyEqual(180 * s, 200, tol: 0.5),
+          detail: "projected=\(180 * s)")
+
+    // Never past the safety floor, however extreme the request.
+    let extreme = CourtMath.planeZFilling(targetHalfWidth: 5000, courtHalfWidth: 10,
+                                          focal: Config.focal, minZ: Config.playerPlaneMinZ)
+    check("clamped at the safety floor", extreme >= Config.playerPlaneMinZ - 0.001,
+          detail: "z=\(extreme)")
+    check("safety floor keeps projection finite", Config.playerPlaneMinZ > -Config.focal,
+          detail: "minZ=\(Config.playerPlaneMinZ) focal=\(Config.focal)")
+    check("rails still extend past the player plane",
+          Config.railNearExtendZ < Config.playerPlaneMinZ,
+          detail: "rail=\(Config.railNearExtendZ) minZ=\(Config.playerPlaneMinZ)")
+
+    // A court already wider than the screen must not push the plane away.
+    let back = CourtMath.planeZFilling(targetHalfWidth: 100, courtHalfWidth: 200,
+                                       focal: Config.focal, minZ: Config.playerPlaneMinZ)
+    check("never pushed behind the first wall", back <= 0, detail: "z=\(back)")
 }
 
 // D2 — AI lateral safety ceiling, computed from real Config endpoints.

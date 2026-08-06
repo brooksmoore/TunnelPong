@@ -173,6 +173,46 @@ enum CourtMath {
         towardPlayer ? -abs(magnitude) : abs(magnitude)
     }
 
+    /// Depth at which a court of half-width `courtHalfWidth` projects to
+    /// `targetHalfWidth` on screen.
+    ///
+    /// Used to place the player's paddle plane exactly at the glass, so the ball
+    /// travels all the way to the viewer instead of stopping on the first wall.
+    /// Clamped to `minZ` so the plane can never approach `-focal`, where the
+    /// perspective divide blows up and the tunnel turns inside out.
+    static func planeZFilling(
+        targetHalfWidth: CGFloat, courtHalfWidth: CGFloat, focal: CGFloat, minZ: CGFloat
+    ) -> CGFloat {
+        guard courtHalfWidth > 0.001, targetHalfWidth > 0.001 else { return 0 }
+        let s = targetHalfWidth / courtHalfWidth        // needed scale (>1 pulls closer)
+        let z = focal * (1 - s) / max(s, 0.0001)
+        // Never push the plane *away* from the viewer past the first wall.
+        return max(min(z, 0), minZ)
+    }
+
+    /// Depth span for type painted on a tunnel surface, centred **on screen**
+    /// inside one wall segment.
+    ///
+    /// Surface type sits at a constant world height, so its screen position is
+    /// proportional to the perspective scale at that depth. Because that scale
+    /// is non-linear in z, insetting equally in z leaves a visible gap at the
+    /// near wall and none at the far one. Insetting in *scale* space instead
+    /// makes both gaps equal, which is what the eye reads as centred.
+    static func surfaceTypeSpan(
+        segStartZ: CGFloat, segEndZ: CGFloat, focal: CGFloat, inset: CGFloat
+    ) -> (near: CGFloat, far: CGFloat) {
+        func scale(_ z: CGFloat) -> CGFloat { focal / max(focal + z, 0.001) }
+        func depth(_ s: CGFloat) -> CGFloat { focal * (1 - s) / max(s, 0.0001) }
+
+        let sStart = scale(segStartZ)          // nearer wall: larger scale
+        let sEnd = scale(segEndZ)              // farther wall: smaller scale
+        let spread = sStart - sEnd
+        guard spread > 0 else { return (segStartZ, segEndZ) }
+
+        let pad = spread * max(0, min(0.45, inset))
+        return (depth(sStart - pad), depth(sEnd + pad))
+    }
+
     /// Who receives the first touch of the next point.
     ///
     /// The ball always goes first toward whoever **won** the previous point:

@@ -7,7 +7,22 @@ struct Config {
     /// Perspective strength. Lower = more dramatic depth distortion.
     /// 280 makes near/far ball size read more clearly than 320.
     static let focal: CGFloat = 280
-    /// Depth of the opponent's paddle plane. The player's plane is z = 0.
+    /// How much of the screen the court fills at the player's paddle plane.
+    ///
+    /// The z axis genuinely continues through the viewer, so the ball should
+    /// arrive all the way at the *screen* rather than stopping on the first
+    /// wall. Rather than hardcode a depth, the player plane is derived so the
+    /// court's projected width equals `playerPlaneScreenFill` × the screen
+    /// width — 1.0 puts the paddle plane exactly at the glass, which is what
+    /// makes the paddle able to cover the whole screen on any device or
+    /// orientation. Above 1.0 pushes the plane closer still and lets the side
+    /// walls run off-frame.
+    static let playerPlaneScreenFill: CGFloat = 1.0
+    /// Hard floor on how close the plane may come, so the projection can never
+    /// approach `-focal` and invert. Also keeps the plane behind the rail stubs.
+    static let playerPlaneMinZ: CGFloat = -140
+
+    /// Depth of the opponent's paddle plane.
     static let zFar: CGFloat = 900
 
     // MARK: - Court (immersive tunnel, not full-frame bezel)
@@ -91,10 +106,15 @@ struct Config {
     // Kept small and simple on purpose — a long dash read as clunky. The dot
     // scales with perspective, so its own acceleration is the timing cue.
 
-    /// Dot radius in points at the near plane (z = 0).
+    /// Dot radius in points, before depth scaling.
     static let depthDotRadius: CGFloat = 5
-    /// Floor on the perspective scale so the dot never vanishes at the far wall.
-    static let depthDotMinScale: CGFloat = 0.42
+    /// Size multiplier at the player's plane and at the far wall. Read linearly
+    /// in depth rather than straight off the perspective divide, so the near/far
+    /// difference is a deliberate, tunable amount instead of whatever the
+    /// projection happens to give. Echoes the rails themselves, which are
+    /// thicker near the viewer and thinner heading away.
+    static let depthDotNearScale: CGFloat = 1.45
+    static let depthDotFarScale: CGFloat = 0.50
     static let depthDotAlpha: CGFloat = 0.95
     /// Same colour as a struck wall — one visual family, two channels.
     static let depthDotColor = ringHitColor
@@ -298,23 +318,30 @@ struct Config {
     // or orientation — the symmetry falls out of the geometry instead of being
     // hand-tuned per device.
 
-    /// Depth of the type's near edge (0 = right at the near wall).
-    static let hudSurfaceZNear: CGFloat = 10
+    /// Inset at BOTH ends of the wall segment, as a fraction of that segment's
+    /// **on-screen** height — not its depth. Perspective is non-linear, so equal
+    /// padding in z produces visibly unequal gaps; equal padding in screen space
+    /// is what actually centres the type between the two walls.
+    static let hudSurfaceSegmentInset: CGFloat = 0.14
     /// Far edge of the surface type, expressed as a **ring index** rather than a
     /// raw depth so it tracks the tunnel's own spacing: 1 means the type ends
     /// exactly on the second ring. Tying it to the rings is what keeps the type
     /// visually "part of" the floor and ceiling — it fills one wall segment, and
     /// it keeps doing so if `ringCount` or `zFar` ever change.
     static let hudSurfaceEndRing: Int = 1
-    /// Depth of the far edge, derived from `hudSurfaceEndRing`.
-    static var hudSurfaceZFar: CGFloat {
-        zFar * CourtMath.ringT(index: hudSurfaceEndRing, ringCount: ringCount)
+    /// Depth span of the type, centred in its wall segment on screen.
+    static var hudSurfaceSpan: (near: CGFloat, far: CGFloat) {
+        CourtMath.surfaceTypeSpan(
+            segStartZ: zFar * CourtMath.ringT(index: hudSurfaceEndRing - 1, ringCount: ringCount),
+            segEndZ: zFar * CourtMath.ringT(index: hudSurfaceEndRing, ringCount: ringCount),
+            focal: focal,
+            inset: hudSurfaceSegmentInset)
     }
     /// World units per label point, horizontally. Above 1 widens the type.
     static let hudSurfaceWidthScale: CGFloat = 1.35
     /// Glyph heights. Bigger than flat HUD text because perspective shrinks the
     /// far rows — these are the *near*-edge sizes.
-    static let hudLevelSize: CGFloat = 30
+    static let hudLevelSize: CGFloat = 36
     static let hudScoreSize: CGFloat = 38
 
     /// Pause glyph opacity. It sits in the bottom-right corner away from the
@@ -409,11 +436,11 @@ struct Config {
     static let audioAmbient: Float = 0.12
 
     // MARK: - Ball trail + contact shadow (hard steps, not soft fade)
-    static let trailLength = 5
-    static let trailAlphaHead: CGFloat = 0.55
-    static let trailAlphaTail: CGFloat = 0.12
+    static let trailLength = 8
+    static let trailAlphaHead: CGFloat = 0.70
+    static let trailAlphaTail: CGFloat = 0.16
     static let trailScaleHead: CGFloat = 1.0
-    static let trailScaleTail: CGFloat = 0.55
+    static let trailScaleTail: CGFloat = 0.62
     static let ballShadowAlpha: CGFloat = 0.45
     static let ballShadowYScale: CGFloat = 0.35
     static let ballShadowXScale: CGFloat = 1.2

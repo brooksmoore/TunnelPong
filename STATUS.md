@@ -1,11 +1,12 @@
 # CyberPong — Status
 
-**Last updated:** 2026-08-04 (Claude) — v1.9 surface type sized to one wall segment, 33 assertions green, installed on device.
+**Last updated:** 2026-08-04 (Claude) — v2.0 ball travels to the glass, 39 assertions green, installed on device.
 
 > **v1.6 mechanics ship.** Centre-start rallies, Curveball-style continuous curve, degrading score bonuses,
 > pure-logic CLI tests green. v2 multiplayer gate still CLOSED.
 
 ### Recent movement
+- **v2.0 "To The Glass"** (2026-08-04): player paddle plane derived to sit at the screen so the ball travels past the first wall to the viewer (`CourtMath.planeZFilling`, clamped so the projection can't invert); motion blur raised; depth dot now scales near→far deliberately; surface type centred in its wall segment by insetting in *scale* space rather than depth. 39 assertions green.
 - **v1.9 "One Segment"** (2026-08-04): surface type depth is now derived from a ring index rather than a raw number, so LVL/score end exactly on the second ring and fill one wall segment. Vertical span down to 52%. Depth dot approved by Brooks. 33 assertions green.
 - **v1.8 "Surface Type"** (2026-08-04): depth tracker simplified to a small dot in the wall-impact colour; LVL and score projected onto the ceiling and floor planes via `PixelLabel.SurfaceProjection` (equidistance falls out of the geometry); pause moved bottom-right at 0.85. **Appearance not verified — no Screen Recording permission.**
 - **v1.7 "Depth Readout"** (2026-08-04): four dashes ride the corner rails at the ball's z, in the ball's colour, giving the missing z-axis cue. x/y walls still stay dark until individually struck (deliberate). Pause moved to bottom-right at 0.85 alpha. 33 assertions green. **Visual result not verified — no Screen Recording permission; Brooks to judge on device.**
@@ -19,7 +20,7 @@
 | Field | Value |
 |-------|--------|
 | Name | **CyberPong** |
-| Version | **v1.9** (surface HUD type; depth dot; centre start; curve + scoring; endless solo chase) |
+| Version | **v2.0** (ball to the glass; surface HUD type; depth dot; centre start; curve + scoring) |
 | Repo | https://github.com/brooksmoore/TunnelPong (public) |
 | Bundle | `com.brooksmoore.tunnelpong` |
 | Platforms | iOS 17+ iPhone/iPad (portrait + landscape) · Mac Catalyst free resize |
